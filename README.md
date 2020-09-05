@@ -1,6 +1,4 @@
-# VJSON
-
-A lightweight but friendly-to-use json parser and DOM in C++.
+vjson is a lightweight but friendly-to-use JSON parser and DOM in C++.
 
 - Small: one ~700-line header, one .cpp file
 - No external dependencies
@@ -19,27 +17,32 @@ A lightweight but friendly-to-use json parser and DOM in C++.
   Does not remember formatting or retain these extra options, so this
   library cannot be used to modify a file and retain source formatting.
 
-# BUILDING
+# Really?  Another JSON parser?
 
-Add ``vjson.cpp`` to your project and compile it.
-
-# REALLY?  ANOTHER JSON PARSER?
-
-Our biggest complaint with other json parsers is how tedius it can be
+Our biggest complaint with other JSON parsers is how tedius it can be
 to write code to load up a file.  Specifically:
 
 - Accessing elements of arrays/maps that are missing or the wrong type
   requiress too many temporary variables and ``if`` checks.
-- Handling "bool"-ish values in a generous way, such as treating a
-  numeric 0 as false.
+- Handling "Booleanish" values in a reasonably generous way, such as
+  treating a numeric 0 as false.
 
-If you want to be extremely strict about extra keys, value of the
-wrong type, etc then there really is no shortcut for writing detailed,
-explicit error handling.  This interface makes it easy write that kind of
-code when the situation calls for it.  But in our experience it's
-more common to have the more modest aim to do "something reasonable"
-with a malformed document, with the least amount of effort possible.
-If a key is missing, supply the default in a single function call.  If
-an array or object is missing, act as if it is empty.  If a value
-is present, but the wrong type, act as if it it missing.  Basically,
-we don't want every other line to be error handling.
+If you want to be extremely strict about extra/missing keys, values of the
+wrong type, etc. then there really is no shortcut for writing detailed,
+explicit error handling.  vjson makes it easy write that kind of code when
+the situation calls for it.  It's when you have the more modest aim
+of doing "something reasonable" with a malformed document, with the least
+amount of effort possible, that vjson shines.  If a key is missing, supply
+the default in a single function call.  If an array or object is missing,
+act as if it is empty.  If a value is present, but the wrong type, act as
+if it it missing.  When loadingparsing a document that is supposed to be a
+single JSON object, just fail if the input is some other JSON value, and
+don't make me write an explicit check for that case.
+
+TL;DR: Error handling should not constitute the majority of the code to
+load up a document, when your goal is simply "do something reasonable, and
+don't crash."
+
+# Building
+
+Add ``vjson.cpp`` to your project and compile it.
