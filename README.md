@@ -1,16 +1,18 @@
+# vjson
+
 vjson is a lightweight but friendly-to-use JSON parser and DOM in C++.
 
 - Small: one ~700-line header, one .cpp file
 - No external dependencies
-- Use STL containers for storage: std::vector for arrays, std::map for objects
-- Strings and keys stored and accessed as std::string.  Also can use
+- Use STL containers for storage: ``std::vector`` for arrays;
+  ``std::map`` for objects.
+- Strings and keys stored and accessed as ``std::string``.  Also can use
   ``const char *`` directly in many places.
 - No exceptions, RTTI, ``iostream``, etc.
 - DOM-style interface (read the whole document into some data structures).
   No SAX-style (streaming) interface.
 - Parser only accepts the document as memory block, so entire source must
   fit in memory.  (``istream``, ``FILE*``, iterator interface, etc)
-- Reports line/column of first parse error.
 - Printing options: Some basic options for minified or indented.
   No framework for detailed customization.
 - Parsing options: Comments and trailing commas can be optionally ignored.
@@ -19,7 +21,7 @@ vjson is a lightweight but friendly-to-use JSON parser and DOM in C++.
 
 # Really?  Another JSON parser?
 
-Our biggest complaint with other JSON parsers is how tedius it can be
+Our biggest complaint with other JSON libs is how tedius it can be
 to write code to load up a file.  Specifically:
 
 - Accessing elements of arrays/maps that are missing or the wrong type
