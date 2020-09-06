@@ -1,4 +1,4 @@
-#include "vjson.h"
+#include "../vjson.h"
 
 #include <gtest/gtest.h>
 

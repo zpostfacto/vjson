@@ -89,8 +89,6 @@ struct PrintOptions; struct ParseContext;
 using RawObject = std::map<std::string, Value>; // Internal storage for for objects.
 using RawArray = std::vector<Value>; // Internal storage for arrays
 using ObjectItem = RawObject::value_type; // A.k.a. std::pair<const std::string,Value>.  You'll get a reference to this when you iterate an Object
-template<typename T, typename V, typename A> struct ArrayIterator;
-template<typename T, typename V, typename A> struct ArrayRange;
 template<typename T> struct TypeTraits {};
 template<> struct TypeTraits<nullptr_t> { static constexpr EValueType kType = kNull; using AsReturnType = void; using AsReturnTypeConst = void; };
 template<> struct TypeTraits<bool> { static constexpr EValueType kType = kBool; using AsReturnType = bool&; using AsReturnTypeConst = const bool&; };
@@ -101,6 +99,12 @@ template<> struct TypeTraits<std::string> { static constexpr EValueType kType = 
 template<> struct TypeTraits<Object> { static constexpr EValueType kType = kObject; using AsReturnType = Object &; using AsReturnTypeConst = const Object &; };
 template<> struct TypeTraits<Array> { static constexpr EValueType kType = kObject; using AsReturnType = Array &; using AsReturnTypeConst = const Array &; };
 template<> struct TypeTraits<ETruthy> { using AsReturnType = ETruthy; using AsReturnTypeConst = ETruthy; };
+template<typename T, typename V, typename A, typename R> struct ArrayIter;
+template<typename T> using ConstArrayIter = ArrayIter<T, const Value *, const RawArray &, typename TypeTraits<T>::AsReturnTypeConst >;
+template<typename T> using MutableArrayIter = ArrayIter<T, Value *, RawArray &, typename TypeTraits<T>::AsReturnType >;
+template<typename T, typename V, typename A, typename I> struct ArrayRange;
+template<typename T> using ConstArrayRange = ArrayRange< T, const Value *, const RawArray &, ConstArrayIter<T> >;
+template<typename T> using MutableArrayRange = ArrayRange< T, Value *, RawArray &, MutableArrayIter<T> >;
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -516,8 +520,8 @@ public:
 	//   Array arr;
 	//   for ( const char *s: arr.Iter<const char *>() ) {}
 	//   for ( Object &x: arr.Iter<Object>() ) {}
-	template <typename T> ArrayRange<T,const Value *,const RawArray &> Iter() const;
-	template <typename T> ArrayRange<T,Value *,RawArray &> Iter();
+	template <typename T> ConstArrayRange<T> Iter() const;
+	template <typename T> MutableArrayRange<T> Iter();
 };
 
 /////////////////////////////////////////////////////////////////////////////
@@ -582,26 +586,26 @@ inline bool ParseArray ( Array  &out, const char *c_str, ParseContext &ctx ) { r
 //
 /////////////////////////////////////////////////////////////////////////////
 
-template<> bool Value::Is<nullptr_t   >() const { return _type == kNull; }
-template<> bool Value::Is<Object      >() const { return _type == kObject; }
-template<> bool Value::Is<Array       >() const { return _type == kArray; }
-template<> bool Value::Is<const char *>() const { return _type == kString; }
-template<> bool Value::Is<std::string >() const { return _type == kString; }
-template<> bool Value::Is<double      >() const { return _type == kDouble; }
-template<> bool Value::Is<bool        >() const { return _type == kBool; }
-template<> const char *       Value::As<const char *>() const { VJSON_ASSERT( _type == kString ); return _string.c_str(); }
-template<> const std::string &Value::As<std::string >() const { VJSON_ASSERT( _type == kString ); return _string; }
-template<> std::string &      Value::As<std::string >()       { VJSON_ASSERT( _type == kString ); return _string; }
-template<> const bool &       Value::As<bool        >() const { VJSON_ASSERT( _type == kBool ); return _bool; } // NOTE: requires exact bool type!
-template<> bool &             Value::As<bool        >()       { VJSON_ASSERT( _type == kBool ); return _bool; } // NOTE: requires exact bool type!
-template<> ETruthy            Value::As<ETruthy     >()       { return AsTruthy(); }
-template<> const double &     Value::As<double      >() const { VJSON_ASSERT( _type == kDouble ); return _double; }
-template<> double &           Value::As<double      >()       { VJSON_ASSERT( _type == kDouble ); return _double; }
-template<> int                Value::As<int         >() const { VJSON_ASSERT( _type == kDouble ); return (int)_double; }
-template<> Object &           Value::As<Object      >()       { VJSON_ASSERT( _type == kObject ); return *(Object*)this; }
-template<> const Object &     Value::As<Object      >() const { VJSON_ASSERT( _type == kObject ); return *(const Object*)this; }
-template<> Array &            Value::As<Array       >()       { VJSON_ASSERT( _type == kArray ); return *(Array*)this; }
-template<> const Array &      Value::As<Array       >() const { VJSON_ASSERT( _type == kArray ); return *(const Array*)(this); }
+template<> inline bool Value::Is<nullptr_t   >() const { return _type == kNull; }
+template<> inline bool Value::Is<Object      >() const { return _type == kObject; }
+template<> inline bool Value::Is<Array       >() const { return _type == kArray; }
+template<> inline bool Value::Is<const char *>() const { return _type == kString; }
+template<> inline bool Value::Is<std::string >() const { return _type == kString; }
+template<> inline bool Value::Is<double      >() const { return _type == kDouble; }
+template<> inline bool Value::Is<bool        >() const { return _type == kBool; }
+template<> inline const char *       Value::As<const char *>() const { VJSON_ASSERT( _type == kString ); return _string.c_str(); }
+template<> inline const std::string &Value::As<std::string >() const { VJSON_ASSERT( _type == kString ); return _string; }
+template<> inline std::string &      Value::As<std::string >()       { VJSON_ASSERT( _type == kString ); return _string; }
+template<> inline const bool &       Value::As<bool        >() const { VJSON_ASSERT( _type == kBool ); return _bool; } // NOTE: requires exact bool type!
+template<> inline bool &             Value::As<bool        >()       { VJSON_ASSERT( _type == kBool ); return _bool; } // NOTE: requires exact bool type!
+template<> inline ETruthy            Value::As<ETruthy     >()       { return AsTruthy(); }
+template<> inline const double &     Value::As<double      >() const { VJSON_ASSERT( _type == kDouble ); return _double; }
+template<> inline double &           Value::As<double      >()       { VJSON_ASSERT( _type == kDouble ); return _double; }
+template<> inline int                Value::As<int         >() const { VJSON_ASSERT( _type == kDouble ); return (int)_double; }
+template<> inline Object &           Value::As<Object      >()       { VJSON_ASSERT( _type == kObject ); return *(Object*)this; }
+template<> inline const Object &     Value::As<Object      >() const { VJSON_ASSERT( _type == kObject ); return *(const Object*)this; }
+template<> inline Array &            Value::As<Array       >()       { VJSON_ASSERT( _type == kArray ); return *(Array*)this; }
+template<> inline const Array &      Value::As<Array       >() const { VJSON_ASSERT( _type == kArray ); return *(const Array*)(this); }
 
 
 template <typename T>
@@ -639,7 +643,7 @@ inline EResult Value::GetAtKey( K&& key, T &outX ) const
 }
 
 template <typename K>
-EResult Value::GetAtKey( K&& key, const Value *&outX ) const
+inline EResult Value::GetAtKey( K&& key, const Value *&outX ) const
 {
 	if ( _type != kObject ) return kNotObject;
 	RawObject::const_iterator i = _object.find( key );
@@ -649,7 +653,7 @@ EResult Value::GetAtKey( K&& key, const Value *&outX ) const
 }
 
 template <typename K>
-EResult Value::GetAtKey( K&& key, Value *&outX )
+inline EResult Value::GetAtKey( K&& key, Value *&outX )
 {
 	if ( _type != kObject ) return kNotObject;
 	RawObject::iterator i = _object.find( key );
@@ -659,7 +663,7 @@ EResult Value::GetAtKey( K&& key, Value *&outX )
 }
 
 template <typename T, typename K>
-bool Value::SetAtKey( K&& key, T&& value )
+inline bool Value::SetAtKey( K&& key, T&& value )
 {
 	if ( _type != kObject ) return false;
 	_object[ std::forward<K>( key ) ] = std::forward<T>( value );
@@ -684,16 +688,18 @@ void Value::SetArray( const T *begin, const T *end )
 }
 
 
-template<typename T, typename V, typename A>
+template<typename T, typename V, typename A, typename R>
 struct ArrayIterator {
 	V v; A arr;
 	ArrayIterator( V b, A a ) : v(b), arr(a) { this->Next(); } 
-	auto operator*() const { return this->v->template As<T>(); }
+	R operator*() const { return this->v->template As<T>(); }
 	void operator++() {
 		VJSON_ASSERT( this->v <= this->end() ); // incremented, but already at the end.  Or, array was modified during iteration
 		++this->v; this->Next();
 	}
-	bool operator!=(const ArrayIterator<T,V,A> &x ) const {
+
+	template<typename XV, typename XA, typename XR>
+	bool operator!=(const ArrayIterator<T,XV,XA,XR> &x ) const {
 		VJSON_ASSERT( &this->arr == &x.arr ); // Should only compare two iterators created from the same array
 		VJSON_ASSERT( this->v <= this->end() && x.v <= this->end() ); // Should not delete from array during iteration
 		return this->v != x.v;
@@ -705,16 +711,15 @@ struct ArrayIterator {
 	}
 	V end() const { return this->arr.data() + this->arr.size(); }
 };
-template<typename T, typename V, typename A> struct ArrayRange
+template<typename T, typename V, typename A, typename I> struct ArrayRange
 {
-	using I = ArrayIterator<T,V,A>;
 	A arr;
 	I begin() const { return I{arr.data(), arr}; }
 	I end() const { return I{arr.data()+arr.size(), arr}; }
 };
 
-template <typename T> ArrayRange<T,const Value *,const RawArray &> Array::Iter() const { return ArrayRange<T,const Value *,const RawArray &>{this->_array}; }
-template <typename T> ArrayRange<T,Value *,RawArray &> Array::Iter() { return ArrayRange<T,Value *,RawArray &>{this->_array}; }
+template <typename T> ConstArrayRange<T> Array::Iter() const { return ConstArrayRange<T>{this->_array}; }
+template <typename T> MutableArrayRange<T> Array::Iter() { return MutableArrayRange<T>{this->_array}; }
 
 } // namespace vjson
 
