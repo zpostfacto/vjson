@@ -1,6 +1,6 @@
 #include "vjson.h"
 
-#include <assert.h>
+#include <gtest/gtest.h>
 
 int main()
 {
