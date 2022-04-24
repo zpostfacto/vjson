@@ -2,12 +2,15 @@
 //
 // vjson is yet another C JSON parser and DOM
 //
+// See README for why I reinvented this wheel.
+//
 // See LICENSE for more information.
 //
 // This file has internals and stuff that don't belong in a header.
 //
-// If you are reading this file to understand how to use vjson, then we
-// have utterly failed and you should provide feedback on what was unclear
+// If you are reading this file to understand how to use vjson, then I
+// have utterly failed and you should provide feedback on what was unclear.
+// The intention is that to *use* vjson, you only need to read the header.
 //
 /////////////////////////////////////////////////////////////////////////////
 
@@ -22,8 +25,24 @@ template <typename T> void InvokeDestructor( T &x ) { x.~T(); }
 template <typename T, typename A> void InvokeConstructor( T &x, A&& a ) { new (&x) T{ std::forward<A>( a ) }; }
 template <typename T> void InvokeConstructor( T &x) { new (&x) T{}; }
 
-const Object &Value::EmptyObject() { static Object dummy; return dummy; }
-const Array &Value::EmptyArray() { static Array dummy; return dummy; }
+const Object &GetStaticEmptyObject()
+{
+	static Object dummy;
+	VJSON_ASSERT( dummy.ObjectSize() == 0 );
+	return dummy;
+}
+const Array &GetStaticEmptyArray()
+{
+	static Array dummy;
+	VJSON_ASSERT( dummy.ArraySize() == 0 );
+	return dummy;
+}
+const Value &GetStaticNullValue()
+{
+	static Value dummy; // note that default constructor sets to null
+	VJSON_ASSERT( dummy.IsNull() );
+	return dummy;
+}
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -72,11 +91,11 @@ void Value::InternalConstruct( Value &&x )
 
 Value *Value::InternalAtIndex( size_t idx, EValueType t ) const
 {
-	Value *v = (const_cast<Value*>(this))->ValueAtIndex( idx );
+	Value *v = (const_cast<Value*>(this))->ValuePtrAtIndex( idx );
 	return (v && v->_type == t) ? v : nullptr; 
 }
 
-Value *Value::ValueAtKey( const std::string &key )
+Value *Value::ValuePtrAtKey( const std::string &key )
 {
 	if ( _type != kObject )
 		return nullptr;
@@ -86,15 +105,25 @@ Value *Value::ValueAtKey( const std::string &key )
 	return &it->second;
 }
 
+Value *Value::ValuePtrAtKey( const char *key )
+{
+	if ( _type != kObject )
+		return nullptr;
+	auto it = _object.find( std::string( key ) ); // UGGGGG PLEASE KILL ME NOW.  Constructing a std::string just to do lookup?  My kingdom for a decent dict type!  STL is such a failure
+	if ( it == _object.end() )
+		return nullptr;
+	return &it->second;
+}
+
 Value *Value::InternalAtKey( const std::string &key, EValueType t ) const
 {
-	Value *v = (const_cast<Value*>(this))->ValueAtKey( key );
+	Value *v = (const_cast<Value*>(this))->ValuePtrAtKey( key );
 	return (v && v->_type == t) ? v : nullptr; 
 }
 
 Value *Value::InternalAtKey( const char *key, EValueType t ) const
 {
-	Value *v = (const_cast<Value*>(this))->ValueAtKey( std::string( key ) );
+	Value *v = (const_cast<Value*>(this))->ValuePtrAtKey( key );
 	return (v && v->_type == t) ? v : nullptr; 
 }
 
@@ -302,6 +331,83 @@ void Value::SetEmptyArray()
 		_type = kArray;
 		InvokeConstructor( _array );
 	}
+}
+
+ETruthy Value::AsTruthy() const
+{
+	switch ( _type )
+	{
+		case kNull:
+			return kFalsish;
+
+		case kBool:
+			return _bool ? kTruish : kFalsish;
+
+		case kNumber:
+			if ( _double == 0.0 )
+				return kFalsish;
+			if ( _double > 0.0 || _double < 0.0 )
+				return kTruish;
+			break; // NaN, etc
+
+		case kString:
+		{
+			if ( _string.empty() )
+				return kFalsish;
+			const char *s = _string.c_str();
+
+			// Manually do case-sensitive compare against "true" / "false".
+			// I don't want to mess with compiler compatibility, locales, etc, etc
+
+			if (
+				( s[0] == 't' || s[0] == 'T' ) &&
+				( s[1] == 'r' || s[1] == 'R' ) &&
+				( s[2] == 'u' || s[2] == 'U' ) &&
+				( s[3] == 'e' || s[3] == 'E' ) &&
+				s[4] == '\0'
+			) {
+				return kTruish;
+			}
+
+			if (
+				( s[0] == 'f' || s[0] == 'F' ) &&
+				( s[1] == 'a' || s[1] == 'A' ) &&
+				( s[2] == 'l' || s[2] == 'L' ) &&
+				( s[3] == 's' || s[3] == 'S' ) &&
+				( s[4] == 'e' || s[4] == 'E' ) &&
+				s[5] == '\0'
+			) {
+				return kFalsish;
+			}
+		} break;
+
+		case kObject:
+		case kArray:
+			break;
+
+		default:
+			VJSON_ASSERT( false );
+			break;
+	}
+
+	// Neither true nor false
+	return kJibberish;
+}
+
+EResult Value::GetTruthy( bool &outX ) const
+{
+	ETruthy t = AsTruthy();
+	if ( t == kTruish )
+	{
+		outX = true;
+		return kOK;
+	}
+	if ( t == kFalsish )
+	{
+		outX = false;
+		return kOK;
+	}
+	return kWrongType;
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -725,7 +831,8 @@ struct Parser
 			Errorf( "End of input during \\u escape sequence", *s );
 			return -1;
 		}
-		unsigned x = 0;
+
+		int x = 0;
 		for ( int i = 0 ; i < 4 ; ++i )
 		{
 			x <<= 4;
@@ -740,10 +847,11 @@ struct Parser
 			{
 				ptr = s; // Set pointer so we can report the location more accurately
 				Errorf( "Character 0x%02x is not a hex digit; invalid \\u-escaped sequence", c );
-				return -1;
+				return false;
 			}
 			++s;
 		}
+
 		return x;
 	}
 
@@ -753,13 +861,15 @@ struct Parser
 		++ptr;
 
 		// Make one pass through to calculate the length (in bytes)
-		size_t l = 0;
+		size_t escape_overhead = 0;
 		const char *s = ptr;
 		for (;;)
 		{
 			if ( s >= end )
 			{
 unterminated_string:
+				// Leave ptr at start of string.  Putting it at the end is usually useless,
+				// But sometimes it's hard to find a straw opening quote.
 				Error( "Unterminated string" );
 				return false;
 			}
@@ -771,7 +881,15 @@ unterminated_string:
 			// Control characters are illegal inside quoted strings
 			if ( *s < 0x20 )
 			{
-				Errorf( "Control character 0x%02x is illegal in string", *s );
+				ptr = s;
+
+				// Provide a more specific error message for newlines,
+				// since this is a common mistake and "control character"
+				// is overly technical
+				if ( *s == '\n' || *s == '\r' )
+					Errorf( "Newline character (0x%02x) in string.  (Missing closing quote?)", *s );
+				else
+					Errorf( "Control character 0x%02x is illegal in string", *s );
 				return false;
 			}
 
@@ -782,24 +900,73 @@ unterminated_string:
 				if ( s >= end )
 					goto unterminated_string;
 
-				if ( *s == 'u' )
+				switch ( *s )
 				{
-					++s;
-					int x = ParseUChar( s );
-					if ( x < 0 )
+					case 'u':
+					{
+						++s;
+						int x = ParseUChar( s );
+						if ( x < 0 )
+							return false;
+
+						// 4 hex digits can only encode unicode codepoints up to 0xffff.
+						// So that's either 1 or two bytes output.
+						if ( x <= 0x7f )
+						{
+							// 5 bytes input, 1 byte output.
+							escape_overhead += 4;
+						}
+						else if ( x <= 0x7ff )
+						{
+							// 5 bytes input, 2 bytes output.
+							escape_overhead += 3;
+						}
+						else
+						{
+							// 5 bytes input, 3 bytes output.
+							escape_overhead += 2;
+						}
+						s += 4;
+					} break;
+
+					case '"':
+					case '\\':
+					case 'b':
+					case 'f':
+					case 'n':
+					case 'r':
+					case 't':
+						// Two characters, which will be encoded as a single character
+						escape_overhead += 1;
+						break;
+
+					// Here we could add an option to allow for other escaped characters,
+					// for example a single quote.  JSON spec does not allow this, but it's
+					// a common mistake when hand-editing
+
+					default:
+						ptr = s;
+						if ( *s > 0x20 && *s < 128 )
+							Errorf( "Invalid escape sequence '\\%c' in string", *s );
+						else
+							Errorf( "Character 0x%2x is not valid after '\\' in string", *s );
 						return false;
-					s += 4;
 				}
-				else
-				{
-					// FIXME
-				}
+			}
+			else
+			{
+				// Ordinary character, nothing to do.
+				++s;
+
+				// FIXME - should we check for invalid UTF-8?
+				// Right now we are being naive and passing this along, but perhaps
+				// we should have a strict mode where we actually check.
 			}
 		}
 
 		// Fast path for no escaped characters.
 		// (Including empty string)
-		if ( ptr + l == s )
+		if ( escape_overhead == 0 )
 		{
 			out.assign( (const char *)ptr, (const char *)s );
 			ptr = s + 1;
@@ -807,11 +974,104 @@ unterminated_string:
 		else
 		{
 
-			// Some escaped characters.  Make another pass and do the translation
-			out.reserve( l );
+			// Some escaped characters.
+			VJSON_ASSERT( ptr + escape_overhead < s );
+
+			// Pre-allocate the output string.
+			// Ugggggg this is going to initialize the string with a
+			// bunch of zeros, which we are then going to overwrite below.
+			// The STL is just so insanely dumb sometimes.  We could use
+			// reserve() to avoid this, but that would mean we have to use
+			// push_back or append() below, which is going to be slower.
+			// It's probably faster to just suffer the memset here?
+			out.resize( s - ptr - escape_overhead );
+
+			// Get a writable pointer to the string.  Note that this const
+			// cast is not necessary beginning with C++17
+			char *d = const_cast<char*>( out.data() );
+
+			// Re-scan tthe string, processing the escape sequences
 			while ( ptr < s )
 			{
-					// FIXME
+
+				// Regular character?
+				if ( *ptr != '\\' )
+				{
+					*d = *ptr;
+					++d;
+					++ptr;
+				}
+				else
+				{
+
+					// Escaped character
+					++ptr;
+					switch ( *(ptr++) )
+					{
+						case 'u':
+						{
+
+							// Parse the character.  Cast to unsigned because it should
+							// not have failed.  It somebody is missing with our buffer
+							// while we are reading from it, and we do actually fail,
+							// we'll handle that below
+							unsigned x = (unsigned)ParseUChar( ptr );
+
+							if ( x <= 0x7F )
+							{
+								d[0] = (unsigned char)x;
+								d += 1;
+							}
+							else if ( x <= 0x7FF )
+							{
+								d[0] = (unsigned char)(x >> 6) | 0xC0;
+								d[1] = (unsigned char)(x & 0x3F) | 0x80;
+								d += 2;
+							}
+							else if ( x <= 0xFFFF )
+							{
+								d[0] = (unsigned char)(x >> 12) | 0xE0;
+								d[1] = (unsigned char)((x >> 6) & 0x3F) | 0x80;
+								d[2] = (unsigned char)(x & 0x3F) | 0x80;
+								d += 3;
+							}
+							else
+							{
+								// Uhhhhh
+								Errorf( "Internal parse BUG, or buffer modified while parsing" );
+								return false;
+							}
+							ptr += 4;
+
+						} break;
+
+						case '\"': *(d++) = '\"'; break;
+						case '\\': *(d++) = '\\'; break;
+						case '/':  *(d++) = '/';  break;
+						case 'b':  *(d++) = '\b'; break;
+						case 'f':  *(d++) = '\f'; break;
+						case 'n':  *(d++) = '\n'; break;
+						case 'r':  *(d++) = '\r'; break;
+						case 't':  *(d++) = '\t'; break;
+
+						// Here we could add an option to allow for other escaped characters,
+						// for example a single quote.  JSON spec does not allow this, but it's
+						// a common mistake when hand-editing
+
+						default:
+							// Should have detected this above
+							--ptr;
+							Errorf( "Internal parse BUG" );
+							return false;
+					}
+				}
+			}
+
+			// Safety check that we wrote exactly what we expected to
+			if ( d != out.c_str() + out.size() )
+			{
+				Errorf( "Internal parse BUG, or buffer modified while parsing" );
+				return false;
 			}
 
 			// Eat the final closing quote.
@@ -1202,10 +1462,11 @@ unterminated_string:
 
 };
 
-bool ParseValue( Value &out, const char *begin, const char *end, ParseContext &ctx )
+bool ParseValue( Value &out, const char *begin, const char *end, ParseContext *ctx )
 {
 	VJSON_ASSERT( begin <= end );
-	Parser p( ctx, begin, end );
+	ParseContext dummy_ctx;
+	Parser p( ctx ? *ctx : dummy_ctx, begin, end );
 	if ( !p.ParseRequiredValue( out ) )
 	{
 		out.SetNull();
@@ -1224,22 +1485,25 @@ bool ParseValue( Value &out, const char *begin, const char *end, ParseContext &c
 }
 
 bool InternalParseTyped( Value &out, const char *begin, const char *end,
-	ParseContext &ctx, EValueType expected_type, const char *expected_type_name )
+	ParseContext *ctx, EValueType expected_type, const char *expected_type_name )
 {
 	if ( !ParseValue( out, begin, end, ctx ) )
 		return false;
 	if ( out.Type() == expected_type )
 		return true;
-	ctx.error_line = 1;
-	ctx.error_byte_offset = 0;
+	if ( ctx )
+	{
+		ctx->error_line = 1;
+		ctx->error_byte_offset = 0;
 
-	char msg[ 256 ];
-	snprintf( msg, sizeof(msg), "Failed to parse JSON %s", expected_type_name );
-	ctx.error_message = msg;
+		char msg[ 256 ];
+		snprintf( msg, sizeof(msg), "Failed to parse JSON %s", expected_type_name );
+		ctx->error_message = msg;
+	}
 	return false;
 }
 
-bool ParseObject( Object &out, const char *begin, const char *end, ParseContext &ctx )
+bool ParseObject( Object &out, const char *begin, const char *end, ParseContext *ctx )
 {
 	if ( InternalParseTyped( out, begin, end, ctx, kObject, "object" ) )
 		return true;
@@ -1247,7 +1511,7 @@ bool ParseObject( Object &out, const char *begin, const char *end, ParseContext 
 	return false;
 }
 
-bool ParseArray( Array &out, const char *begin, const char *end, ParseContext &ctx )
+bool ParseArray( Array &out, const char *begin, const char *end, ParseContext *ctx )
 {
 	if ( InternalParseTyped( out, begin, end, ctx, kArray, "array" ) )
 		return true;
