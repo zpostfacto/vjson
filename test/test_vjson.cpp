@@ -25,7 +25,7 @@ void CheckTruthy( const vjson::Value &v, vjson::ETruthy expected )
 			EXPECT_FALSE( truth_val );
 			break;
 
-		case vjson::kJibberish:
+		case vjson::kGibberish:
 			EXPECT_FALSE( v.IsTruish() );
 			EXPECT_FALSE( v.IsFalsish() );
 			EXPECT_EQ( v.GetTruthy( truth_val ), vjson::kWrongType );
@@ -73,7 +73,7 @@ R"JSON({
 	EXPECT_TRUE( &doc.AsObjectOrEmpty() == &doc );
 	EXPECT_TRUE( doc.AsObjectPtr() == &doc );
 	EXPECT_TRUE( doc.AsArrayPtr() == nullptr );
-	CheckTruthy( doc, vjson::kJibberish );
+	CheckTruthy( doc, vjson::kGibberish );
 
 	// Check each of the subkeys
 
@@ -147,7 +147,7 @@ R"JSON({
 
 		EXPECT_TRUE( doc["empty_string"].AsCString( "a non-empty string" ) == doc["empty_string"].AsString().c_str() );
 		EXPECT_TRUE( doc["empty_string"].AsCString() == doc["empty_string"].AsString().c_str() );
-		EXPECT_TRUE( doc["empty_string"].As<const char *>() == doc["empty_string"].AsString() );
+		EXPECT_TRUE( doc["empty_string"].As<const char *>() == doc["empty_string"].AsCString() );
 
 		sval = "bogus";
 		EXPECT_EQ( doc["empty_string"].Get( sval ), vjson::kOK );
@@ -160,7 +160,40 @@ R"JSON({
 		CheckTruthyAtKey( doc, "empty_string", vjson::kFalsish ); // Empty string is falsish
 	}
 
+	{
+		std::string sval;
+		const char *cval;
+
+		ASSERT_TRUE( doc.HasKey( "true_string" ) );
+
+		EXPECT_TRUE( doc["true_string"].IsString() );
+		EXPECT_TRUE( doc["true_string"].Is<std::string>() );
+		EXPECT_TRUE( doc["true_string"].Is<const char *>() );
+
+		EXPECT_STREQ( doc["true_string"].AsString( "Jabberwocky" ).c_str(), "true" );
+		EXPECT_STREQ( doc["true_string"].AsString().c_str(), "true" );
+		EXPECT_STREQ( doc["true_string"].As<std::string>().c_str(), "true" );
+
+		EXPECT_TRUE( doc["true_string"].AsCString( "Jabberywocky" ) == doc["true_string"].AsString().c_str() );
+		EXPECT_TRUE( doc["true_string"].AsCString() == doc["true_string"].AsString().c_str() );
+		EXPECT_TRUE( doc["true_string"].As<const char *>() == doc["true_string"].AsCString() );
+
+		sval = "bogus";
+		EXPECT_EQ( doc["true_string"].Get( sval ), vjson::kOK );
+		EXPECT_STREQ( sval.c_str(), "true" );
+
+		cval = "bogus";
+		EXPECT_EQ( doc["true_string"].Get( cval ), vjson::kOK );
+		EXPECT_STREQ( cval, "true" );
+
+		CheckTruthyAtKey( doc, "true_string", vjson::kTruish ); // The string "true" is truish
+	}
+	CheckTruthyAtKey( doc, "false_string", vjson::kFalsish ); // The string "false" is truish
+
 	EXPECT_FALSE( doc.HasKey( "bogus_key" ) );
+	EXPECT_EQ( doc.TruthyAtKey( "bogus_key" ), vjson::kGibberish );
+	EXPECT_FALSE( doc.IsTruishAtKey( "bogus_key" ) );
+	EXPECT_FALSE( doc.IsFalsishAtKey( "bogus_key" ) );
 }
 
 int main(int argc, char **argv) {

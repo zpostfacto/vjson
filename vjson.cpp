@@ -391,7 +391,7 @@ ETruthy Value::AsTruthy() const
 	}
 
 	// Neither true nor false
-	return kJibberish;
+	return kGibberish;
 }
 
 EResult Value::GetTruthy( bool &outX ) const

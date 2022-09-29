@@ -1,8 +1,8 @@
 /////////////////////////////////////////////////////////////////////////////
 //
 // Yes, it's yet another C++ JSON parser/printer and DOM.  Please see the
-// README for some of the goals of this code, and why we weren't happy with
-// the other parsers we found and decided to reinvent this wheel.
+// README for some of the goals of this code, and why I wasn't happy with
+// the other JSON DOMs/parsers I found and decided to reinvent this wheel.
 //
 /////////////////////////////////////////////////////////////////////////////
 
@@ -10,6 +10,7 @@
 #define VJSON_H_INCLUDED
 
 #include <string.h>
+#include <stdint.h>
 #include <string>
 #include <vector>
 #include <map>
@@ -59,34 +60,21 @@ enum EResult
 	kBadKey, // Key not found in object
 };
 
-// Sometimes we want to get a bool value, but we want to be tolerant of
-// some common ways that true or false might be encoded.  These values are
-// considered "truish":
-// - literal true
-// - nonzero number
-// - string containing "true" (case insensitive) or "1"
-//
-// These values are considered "falsish":
-// - literal false or null
-// - 0 number
-// - string containing "false" (case insensitive) or "0"
-//
-// Everything else is "jibberish".  Come on, go with it.
-//
-// Note that in practice, you can use named functions like IsTruish() and
-// IsFalsish(), so the whimsically named "jibberish" need never cause
-// offensive in Very Serious code.
-enum ETruthy
-{
-	kJibberish = -1,
-	kFalsish = 0,
-	kTruish = 1
-};
-
 // Internal implementation details.  Nothing to see here, move along...
 class Value; class Object; class Array;
 struct PrintOptions; struct ParseContext;
-using RawObject = std::map<std::string, Value>; // Internal storage for for objects.
+struct ObjectKeyLess
+{
+	bool operator()( const std::string &l, const std::string &r ) const { return strcmp( l.c_str(), r.c_str() ) < 0; }
+
+	// With C++14, we don't need to make a copy of the key to do lookup,
+	// so long as the comparator can compare the types.
+	bool operator()( const std::string &l, const char *r ) const { return strcmp( l.c_str(), r ) < 0; }
+	bool operator()( const char *l, const std::string &r ) const { return strcmp( l, r.c_str() ) < 0; }
+
+	// FIXME string_view?
+};
+using RawObject = std::map<std::string, Value, ObjectKeyLess>; // Internal storage for for objects.
 using RawArray = std::vector<Value>; // Internal storage for arrays
 using ObjectItem = RawObject::value_type; // A.k.a. std::pair<const std::string,Value>.  You'll get a reference to this when you iterate an Object
 template<typename T> struct TypeTraits {};
@@ -98,7 +86,6 @@ template<> struct TypeTraits<const char *> { static constexpr EValueType kType =
 template<> struct TypeTraits<std::string> { static constexpr EValueType kType = kString; using AsReturnType = std::string &; using AsReturnTypeConst = const std::string &; };
 template<> struct TypeTraits<Object> { static constexpr EValueType kType = kObject; using AsReturnType = Object &; using AsReturnTypeConst = const Object &; };
 template<> struct TypeTraits<Array> { static constexpr EValueType kType = kObject; using AsReturnType = Array &; using AsReturnTypeConst = const Array &; };
-template<> struct TypeTraits<ETruthy> { using AsReturnType = ETruthy; using AsReturnTypeConst = ETruthy; };
 template<typename T, typename V, typename A, typename R> struct ArrayIter;
 template<typename T> using ConstArrayIter = ArrayIter<T, const Value *, const RawArray &, typename TypeTraits<T>::AsReturnTypeConst >;
 template<typename T> using MutableArrayIter = ArrayIter<T, Value *, RawArray &, typename TypeTraits<T>::AsReturnType >;
@@ -127,43 +114,24 @@ public:
 	//
 	// Read this Value as a specific data type.
 	//
-	// There are three basic types of accessors, depending on how you want
-	// to handle calling
+	// There are a few basic types of accessors, depending on how you want
+	// to handle the value being the wrong type
 	//
 	// - {Type} As{Typename}() : will assert or misbehave if the Value is
 	//   not the right type.
-	//   There's also template-style: TypeAs<Type>()
-	// - {Type} As{Typename}({Type} defaultValue ) : return the
+	//   There's also template-style: Type As<Type>()
+	// - {Type} As{Typename}( {Type} defaultValue ) : return the
 	//   supplied default value if the Valwue is not the right type.
-	// - EResult Get( {Type} &out ) : put the result in your output variable,
-	//   return an enum indicating whether we were successful.
+	// - bool Get( {Type} &out ) : put the result in your output variable,
+	//   return true if we were successful, false if it was the wrong type.
 	//
 	// NOTE: very often you are interested in accessing a child value from an Object
-	//       or Array.  In that case, use one of the array/object lookuip functions
+	//       or Array.  In that case, use one of the array/object lookup functions
 	//       below, which combine lookup and type conversion in one conveinent call!
 	//
 
-	// Return/cast this value as the specified type.
-	// NOTE: These will asserts/crash if called on the wrong type!
-	const char *       AsCString() const { VJSON_ASSERT( _type == kString ); return _string.c_str(); }
-	const std::string &AsString()  const { VJSON_ASSERT( _type == kString ); return _string; }
-	std::string &      AsString()        { VJSON_ASSERT( _type == kString ); return _string; }
-	const bool &       AsBool()    const { VJSON_ASSERT( _type == kBool ); return _bool; } // NOTE: requires exact bool type!
-	bool &             AsBool()          { VJSON_ASSERT( _type == kBool ); return _bool; } // NOTE: requires exact bool type!
-	const double &     AsDouble()  const { VJSON_ASSERT( _type == kDouble ); return _double; }
-	double &           AsDouble()        { VJSON_ASSERT( _type == kDouble ); return _double; }
-	int                AsInt()     const { VJSON_ASSERT( _type == kDouble ); return (int)_double; }
-	const Object &     AsObject()  const { VJSON_ASSERT( _type == kObject ); return *(const Object*)this; }
-	Object &           AsObject()        { VJSON_ASSERT( _type == kObject ); return *(Object*)this; }
-	const Array &      AsArray()   const { VJSON_ASSERT( _type == kArray ); return *(const Array*)(this); }
-	Array &            AsArray()         { VJSON_ASSERT( _type == kArray ); return *(Array*)this; }
-
-	// Template-style As<T> for the AsXxxxx methods above.
-	// (See full list of specializations at the bottom of this file.)
-	template<typename T> typename TypeTraits<T>::AsReturnTypeConst As() const;
-	template<typename T> typename TypeTraits<T>::AsReturnType As();
-
-	// Get this value as the specified type.  If wrong type, returns the default you specify
+	// Get this value as the specified type.  If the value is not the exact
+	// JSON type, returns the default you specify.  No conversions are attempted.
 	const char *AsCString( const char *       defaultVal ) const { return _type == kString ? _string.c_str() : defaultVal; }
 	std::string AsString(  const char *       defaultVal ) const { return _type == kString ? _string : std::string( defaultVal ); } // NOTE: always returns a copy
 	std::string AsString(  const std::string &defaultVal ) const { return _type == kString ? _string : defaultVal; } // NOTE: always returns a copy, because defaultVal could be a temp!
@@ -182,11 +150,33 @@ public:
 	const Array * AsArrayPtr()  const { return _type == kArray ? (const Array *)this : nullptr; }
 	Array *       AsArrayPtr()        { return _type == kArray ? (Array *)this : nullptr; }
 
-	// Get the value as the specified type into your result value.  Returns kOK or kWrongType
+	// Perform a "static cast" of the value to the specified type.  The value must be
+	// already be the correct type, no converstions or type checks are attempted.
+	// NOTE: These will assert/crash if called on the wrong type!
+	const char *       AsCString() const { VJSON_ASSERT( _type == kString ); return _string.c_str(); }
+	const std::string &AsString()  const { VJSON_ASSERT( _type == kString ); return _string; }
+	std::string &      AsString()        { VJSON_ASSERT( _type == kString ); return _string; }
+	const bool &       AsBool()    const { VJSON_ASSERT( _type == kBool ); return _bool; } // NOTE: requires exact bool type!
+	bool &             AsBool()          { VJSON_ASSERT( _type == kBool ); return _bool; } // NOTE: requires exact bool type!
+	const double &     AsDouble()  const { VJSON_ASSERT( _type == kDouble ); return _double; }
+	double &           AsDouble()        { VJSON_ASSERT( _type == kDouble ); return _double; }
+	int                AsInt()     const { VJSON_ASSERT( _type == kDouble ); return (int)_double; }
+	const Object &     AsObject()  const { VJSON_ASSERT( _type == kObject ); return *(const Object*)this; }
+	Object &           AsObject()        { VJSON_ASSERT( _type == kObject ); return *(Object*)this; }
+	const Array &      AsArray()   const { VJSON_ASSERT( _type == kArray ); return *(const Array*)(this); }
+	Array &            AsArray()         { VJSON_ASSERT( _type == kArray ); return *(Array*)this; }
+
+	// Template-style As<T> for the AsXxxxx static-cast methods above.
+	// (See full list of specializations at the bottom of this file.)
+	template<typename T> typename TypeTraits<T>::AsReturnTypeConst As() const;
+	template<typename T> typename TypeTraits<T>::AsReturnType As();
+
+	// Get the value as the specified type into your result value.
+	// If the value is not the correct JSON type, returns kWrongType.
+	// no conversions are attempted.
 	EResult Get( const char *  &outX ) const { if ( _type != kString ) return kWrongType; outX = _string.c_str(); return kOK; }
 	EResult Get( std::string   &outX ) const { if ( _type != kString ) return kWrongType; outX = _string; return kOK; }
 	EResult Get( bool          &outX ) const { if ( _type != kBool ) return kWrongType; outX = _bool; return kOK; }
-	EResult Get( ETruthy       &outX ) const { outX = AsTruthy(); return kOK; }
 	EResult Get( double        &outX ) const { if ( _type != kDouble ) return kWrongType; outX = _double; return kOK; }
 	EResult Get( int           &outX ) const { if ( _type != kDouble ) return kWrongType; outX = (int)_double; return kOK; }
 	EResult Get( const Object *&outX ) const { if ( _type != kObject ) return kWrongType; outX = (const Object*)this; return kOK; }
@@ -194,20 +184,27 @@ public:
 	EResult Get( const Array * &outX ) const { if ( _type != kArray ) return kWrongType; outX = (const Array*)this; return kOK; }
 	EResult Get( Array *       &outX )       { if ( _type != kArray ) return kWrongType; outX = (Array*)this; return kOK; }
 
-	//
-	// Get the the "truthiness" of the current value.  This can be used when
-	// you want to be a bit more generous about exactly what counts as "true"
-	// and "false".  See ETruthy for more info.
-	//
+	// Get the value as the specified type, performing "reasonable" conversions
+	// such as parsing strings, treating 0 and 1 as false and true,
+	// converting to string, etc.  If conversion is not possible, your default
+	// is returned.
+	// NOTE that ToString() does not do JSON formatting, escaping, etc.
+	std::string ToString(  const char *       defaultVal = "" ) const; // All "scalar" values can be converted to string.  Arrays and objects will fail.
+	std::string ToString(  const std::string &defaultVal = std::string{} ) const;
+	bool        ToBool(    bool               defaultVal = false ) const;
+	double      ToDouble(  double             defaultVal = 0.0 ) const;
+	int         ToInt(     int                defaultVal = 0 ) const;
+	uint64_t    ToUInt64(  uint64_t           defaultVal = 0 ) const;
 
-	// Get a bool value, but allow a few other reasonable things instead of strict bool "true" and "false"
-	// literals.  See ETruthy for exactly what counts as "truish" and "falsish".
-	ETruthy AsTruthy() const;
-	bool IsTruish() const { return AsTruthy() == kTruish; }
-	bool IsFalsish() const  { return AsTruthy() == kFalsish; }
-
-	// Get the "truthiness" of this value.  Returns kWrongType if the value is jibberish (neither trueish or falseish)
-	EResult GetTruthy( bool &outX) const;
+	// Get the value as the specified type into your result value, performing
+	// reasonable conversions if necessary.  If conversion is not possible,
+	// kWrongType is returned and your value is not modified.
+	EResult Convert( std::string   &outX ) const;
+	EResult Convert( bool          &outX ) const;
+	EResult Convert( double        &outX ) const;
+	EResult Convert( int           &outX ) const;
+	EResult Convert( double        &outX ) const;
+	EResult Convert( uint64_t      &outX ) const;
 
 	//
 	// Construction and assignment
@@ -256,6 +253,7 @@ public:
 	void SetNull() { InternalDestruct(); _type = kNull; }
 	void SetEmptyObject();
 	void SetEmptyArray();
+	void SetUint64AsString( uint64_t x );
 
 	// Assign array from list of T's, where T is anything we can construct a Value from
 	// See also class Array constructors
@@ -319,9 +317,7 @@ public:
 	template <typename K> const char *  CStringAtKey  ( K&& key, const char *defaultVal        ) const { const Value *t = InternalAtKey( key, kString ); return t ? t->_string.c_str() : defaultVal; }
 	template <typename K> std::string   StringAtKey   ( K&& key, const char *defaultVal        ) const { const Value *t = InternalAtKey( key, kString ); return t ? t->_string : std::string( defaultVal ); } // NOTE: always returns a copy
 	template <typename K> std::string   StringAtKey   ( K&& key, const std::string &defaultVal ) const { const Value *t = InternalAtKey( key, kString ); return t ? t->_string : defaultVal; } // NOTE: always returns a copy
-	template <typename K> bool          BoolAtKey     ( K&& key, bool               defaultVal ) const { const Value *t = InternalAtKey( key, kBool ); return t ? t->_bool : defaultVal; }
-	template <typename K> ETruthy       TruthyAtKey   ( K&& key                                ) const { const Value *t = ValuePtrAtKey( key ); return t ? t->AsTruthy() : kJibberish; } // Returns kJibberish if we're not an object, bad key, or value at key cannot be classified
-	template <typename K> bool          TruthyAtKey   ( K&& key, bool               defaultVal ) const { ETruthy t = ValuePtrAtKey( key );  return t != kJibberish ? (bool)t : defaultVal; } // Always returns true/false.  Uses your default if we cannot make sense of things
+	template <typename K> bool          BoolAtKey     ( K&& key, bool               defaultVal ) const { const Value *t = InternalAtKey( key, kBool ); return t ? t->_bool : defaultVal; } // Requires strict bool type
 	template <typename K> double        DoubleAtKey   ( K&& key, double             defaultVal ) const { const Value *t = InternalAtKey( key, kDouble ); return t ? t->_bool : defaultVal; }
 	template <typename K> int           IntAtKey      ( K&& key, int                defaultVal ) const { const Value *t = InternalAtKey( key, kDouble ); return t ? (int)t->_double : defaultVal; }
 	template <typename K> const Object *ObjectPtrAtKey( K&& key                                ) const { (const Object *)InternalAtKey( key, kObject ); }
@@ -378,13 +374,18 @@ public:
 	size_t ObjectSize() const { return _type == kObject ? _object.size() : 0; }
 
 	// Set the value at the given key.  If the key is not present, it is added.
-	// If the key is present, the value is changed.  Returns false if this
+	// If the key is present, the value is changed.  Returns kNotObject if this
 	// is not an object.  See also Object::operator[].  T can be anything
 	// that a Value can be constructed from.
-	template <typename T, typename K> bool SetAtKey( K&& key, T&& value );
+	template <typename T, typename K> EResult SetAtKey( K&& key, T&& value );
 
 	// Delete the specified key.  Returns kOK, kNotObject, or kBadKey
-	template <typename K> EResult EraseKey( K&& key );
+	template <typename K> EResult EraseAtKey( K&& key );
+
+	// Effeciently move the value at the specified key into your
+	// result and remove it from this object.  Returns kOK, kNotObject,
+	// or kBadKey.  Your value is not modified on failure.
+	template <typename K> EResult DetachAtKey( K&& key, Value *pOutDetached );
 
 	//
 	// Array access
@@ -413,9 +414,8 @@ public:
 	const char *  CStringAtIndex  ( size_t idx, const char *       defaultVal ) const { const Value *t = InternalAtIndex( idx, kString ); return t ? t->_string.c_str() : defaultVal; }
 	std::string   StringAtIndex   ( size_t idx, const char *       defaultVal ) const { const Value *t = InternalAtIndex( idx, kString ); return t ? t->_string : std::string( defaultVal ); } // NOTE: always returns a copy
 	std::string   StringAtIndex   ( size_t idx, const std::string &defaultVal ) const { const Value *t = InternalAtIndex( idx, kString ); return t ? t->_string : defaultVal; } // NOTE: always returns a copy
-	bool          BoolAtIndex     ( size_t idx, bool               defaultVal ) const { const Value *t = InternalAtIndex( idx, kBool ); return t ? t->_bool : defaultVal; }
-	ETruthy       TruthyAtIndex   ( size_t idx                                ) const { const Value *t = ValuePtrAtIndex( idx ); return t ? t->AsTruthy() : kJibberish; } // Returns kJibberish if we're not an array, bad index, or value at index cannot be classified
-	bool          TruthyAtIndex   ( size_t idx, bool               defaultVal ) const { ETruthy t = TruthyAtIndex( idx ); return t != kJibberish ? (bool)t : defaultVal; } // Always returns true/false.  Uses your default if we cannot make sense of things
+	bool          BoolAtIndex     ( size_t idx, bool               defaultVal ) const { const Value *t = InternalAtIndex( idx, kBool ); return t ? t->_bool : defaultVal; } // Requires strict bool type
+	ETruthy       TruthyAtIndex   ( size_t idx                                ) const { const Value *t = ValuePtrAtIndex( idx ); return t ? t->AsTruthy() : kGibberish; } // Returns kGibberish if we're not an array, bad index, or value at index cannot be classified
 	double        DoubleAtIndex   ( size_t idx, double             defaultVal ) const { const Value *t = InternalAtIndex( idx, kDouble ); return t ? t->_bool : defaultVal; }
 	int           IntAtIndex      ( size_t idx, int                defaultVal ) const { const Value *t = InternalAtIndex( idx, kDouble ); return t ? (int)t->_double : defaultVal; }
 	const Object *ObjectPtrAtIndex( size_t idx                                ) const { return (const Object *)InternalAtIndex( idx, kObject ); }
@@ -432,6 +432,12 @@ public:
 	// Any type for which Get( T & ) is defined will work.
 	template <typename T> EResult GetAtIndex( size_t idx, T &outX ) const;
 	EResult GetAtIndex( size_t idx, Value *&outX );
+
+	// Test child at index for being truish or falsish.  You'll usually
+	// use this instead of using TruthyAtIndex.  If this is not an array
+	// or the index is invalid, both functions return false.
+	bool IsTruishAtIndex( size_t idx ) const { const Value *t = ValuePtrAtIndex( idx ); return t && t->IsTruish(); }
+	bool IsFalsishAtIndex( size_t idx ) const { const Value *t = ValuePtrAtIndex( idx ); return t && t->IsFalsish(); }
 
 	//
 	// Lookup by index for generic Values (does not check the type of the child).
@@ -477,9 +483,9 @@ protected:
 	Value *InternalAtKey( const char *key, EValueType t ) const;
 };
 
-// An Object is a Value that is known to be of type kObject.  Since
-// it is known to be an object, we can provide a more idiomatic object
-// interface, and we can optimize a few function calls.
+// An Object is a Value that is known (or at least assumed) to be of type
+// kObject.  Since it is assumed to be an object, we can provide a more
+// idiomatic object interface, and we can optimize a few function calls.
 class Object : public Value
 {
 public:
@@ -500,6 +506,12 @@ public:
 	Value &operator[]( const std::string &key ) { VJSON_ASSERT( _type == kObject ); return _object[ key ]; }
 	Value &operator[]( const char *key ) { VJSON_ASSERT( _type == kObject ); return _object[ std::string(key) ];  }
 
+	// Return true if the object is empty
+	bool empty() const { VJSON_ASSERT( _type == kObject ); return _object.empty(); }
+
+	// Remove all the items from the object
+	void clear() { VJSON_ASSERT( _type == kObject ); _object.clear(); }
+
 	// Access underying object
 	inline RawObject       &Raw()       { VJSON_ASSERT( _type == kObject ); return _object; }
 	inline RawObject const &Raw() const { VJSON_ASSERT( _type == kObject ); return _object; }
@@ -519,12 +531,12 @@ public:
 	RawObject::const_iterator begin() const { VJSON_ASSERT( _type == kObject ); return _object.begin(); }
 	RawObject::const_iterator end() const { VJSON_ASSERT( _type == kObject ); return _object.end(); }
 
-	// TODO - add type-specific iterators
+	// TODO - add type-specific iterators, so you can easily iterate, e.g. all the ints
 };
 
-// An Array is a Value that is known to be of type kArray.  Since
-// it is known to be an array, we can provide a more idiomatic array
-// interface, and we can optimize a few function calls.
+// An Array is a Value that is known (or at least assumed) to be of type
+// kArray.  Since it is assumed to be an array, we can provide a more
+// idiomatic object interface, and we can optimize a few function calls.
 class Array : public Value
 {
 public:
@@ -738,10 +750,22 @@ inline bool Value::SetAtKey( K&& key, T&& value )
 }
 
 template <typename K>
-EResult Value::EraseKey( K&& key )
+EResult Value::EraseAtKey( K&& key )
 {
 	if ( _type != kObject ) return kNotObject;
 	if ( _object.erase( std::forward<K>( key ) ) == 0 ) return kBadKey;
+	return kOK;
+}
+
+template <typename K>
+EResult Value::DetachAtKey( K&& key, Value *pOutDetached )
+{
+	if ( _type != kObject ) return kNotObject;
+	RawObject::iterator i = _object.find( key );
+	if ( i == _object.end() ) return kBadKey;
+	if ( pOutDetached )
+		*pOutDetached = std::move( i->second );
+	_object.erase( i );
 	return kOK;
 }
 

@@ -48,6 +48,11 @@ to write code to load up a file.  Specifically:
   - An object or array has a value, but it's the wrong type
 - Handling "Booleanish" values in a reasonably generous way, such as
   treating a numeric 0 as false.
+- Make it easy to deal with 64-bit numbers as strings.  (JSON only
+  supports "numbers", which are usually represented as doubles.  A 64-bit
+  value encoded as a "number" is very likely to be mutated in transit.)
+  FIXME - haven't actually added the To<> and Cast<> operatons yet.
+  Will probably also replace the shimsical truthy stuff with To<bool>
 
 If you want to be extremely strict about extra/missing keys, values of the
 wrong type, etc. then there really is no shortcut for writing detailed,
@@ -108,9 +113,9 @@ project.
   header file.  One design goal was the ability to put "JSON" loking
   syntax directly in C++ code and use Modern C++ be able to parse it
   into a data structure.
-- [ujson](https://github.com/awangk/ujson) A tiny library that we were
+- [ujson](https://github.com/awangk/ujson) A tiny library that I was
   using for a while at Valve.  I found some bugs and reported them,
   the project has been abandoned.  The main reason for mentioning it
   is that it is partly the namesake of this library.
-- [picojson](https://github.com/kazuho/picojson) We used this at Valve
+- [picojson](https://github.com/kazuho/picojson) I used this at Valve
   for a while after abandoning ujson.  It uses exceptions and streams.
