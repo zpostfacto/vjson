@@ -6,17 +6,20 @@
 //
 // See LICENSE for more information.
 //
-// This file has internals and stuff that don't belong in a header.
-//
-// If you are reading this file to understand how to use vjson, then I
+// If you are reading the soruce code to understand how to use vjson, then I
 // have utterly failed and you should provide feedback on what was unclear.
 // The intention is that to *use* vjson, you only need to read the header.
 //
 /////////////////////////////////////////////////////////////////////////////
 
 #include <stdarg.h>
+#include <inttypes.h>
+#include <locale.h>
 
 #include "vjson.h"
+
+// @VALVE
+#undef new
 
 namespace vjson {
 
@@ -109,7 +112,7 @@ Value *Value::ValuePtrAtKey( const char *key )
 {
 	if ( _type != kObject )
 		return nullptr;
-	auto it = _object.find( std::string( key ) ); // UGGGGG PLEASE KILL ME NOW.  Constructing a std::string just to do lookup?  My kingdom for a decent dict type!  STL is such a failure
+	auto it = _object.find( key ); // NOTE: Before C++14, this makes a copy of the key!!!!  SO BAD!
 	if ( it == _object.end() )
 		return nullptr;
 	return &it->second;
@@ -143,9 +146,9 @@ Value::Value( const char *x ) : _type( kString ), _string( x ) {}
 Value::Value( const std::string &x ) : _type( kString ), _string( x ) {}
 Value::Value( std::string &&x ) : _type( kString ), _string( std::forward<std::string>( x ) ) {}
 Value::Value( const RawObject & x ) : _type( kObject ), _object( x ) {}
-Value::Value( RawObject &&      x ) : _type( kObject ), _object( std::forward<RawObject>( x ) ) {}
-Value::Value( const RawArray &  x ) : _type( kArray ), _array( x ) {}
-Value::Value( RawArray &&       x ) : _type( kArray ), _array( std::forward<RawArray>( x ) ) {}
+Value::Value( RawObject && x ) : _type( kObject ), _object( std::forward<RawObject>( x ) ) {}
+Value::Value( const RawArray & x ) : _type( kArray ), _array( x ) {}
+Value::Value( RawArray && x ) : _type( kArray ), _array( std::forward<RawArray>( x ) ) {}
 
 Value &Value::operator=( const Value &x )
 {
@@ -175,7 +178,7 @@ Value &Value::operator=( Value &&x )
 {
 	if ( _type == x._type )
 	{
-		if ( this != &x ) // Not sure if this is necessary.  Do the STL types protect against self-assignment?
+		if ( this != &x ) // Not sure if this is necessary. Do the STL types protect against self-assignment?
 		{
 			if ( _type == kObject )
 				_object = std::move( x._object );
@@ -190,7 +193,7 @@ Value &Value::operator=( Value &&x )
 	else
 	{
 		InternalDestruct();
-		InternalConstruct(x);
+		InternalConstruct( std::forward<Value>(x) );
 	}
 	return *this;
 }
@@ -199,7 +202,7 @@ Value &Value::operator=( const char *x )
 {
 	if ( _type == kString )
 	{
-		if ( x != _string.c_str() ) // Not sure if this is necessary.  Do the STL types protect against self-assignment?
+		if ( x != _string.c_str() ) // Not sure if this is necessary. Do the STL types protect against self-assignment?
 			_string = x;
 	}
 	else
@@ -214,7 +217,7 @@ Value &Value::operator=( const std::string &x )
 {
 	if ( _type == kString )
 	{
-		if ( &x != &_string ) // Not sure if this is necessary.  Do the STL types protect against self-assignment?
+		if ( &x != &_string ) // Not sure if this is necessary. Do the STL types protect against self-assignment?
 			_string = x;
 	}
 	else
@@ -229,7 +232,7 @@ Value &Value::operator=( std::string &&x )
 {
 	if ( _type == kString )
 	{
-		if ( &x != &_string ) // Not sure if this is necessary.  Do the STL types protect against self-assignment?
+		if ( &x != &_string ) // Not sure if this is necessary. Do the STL types protect against self-assignment?
 			_string = std::forward<std::string>( x );
 	}
 	else
@@ -245,7 +248,7 @@ Value &Value::operator=( const RawArray &x )
 {
 	if ( _type == kArray )
 	{
-		if ( &x != &_array ) // Not sure if this is necessary.  Do the STL types protect against self-assignment?
+		if ( &x != &_array ) // Not sure if this is necessary. Do the STL types protect against self-assignment?
 			_array = x;
 	}
 	else
@@ -261,7 +264,7 @@ Value &Value::operator=( RawArray &&x )
 {
 	if ( _type == kArray )
 	{
-		if ( &x != &_array ) // Not sure if this is necessary.  Do the STL types protect against self-assignment?
+		if ( &x != &_array ) // Not sure if this is necessary. Do the STL types protect against self-assignment?
 			_array = std::forward<RawArray>( x );
 	}
 	else
@@ -277,7 +280,7 @@ Value &Value::operator=( const RawObject &x )
 {
 	if ( _type == kObject )
 	{
-		if ( &x != &_object ) // Not sure if this is necessary.  Do the STL types protect against self-assignment?
+		if ( &x != &_object ) // Not sure if this is necessary. Do the STL types protect against self-assignment?
 			_object = x;
 	}
 	else
@@ -293,7 +296,7 @@ Value &Value::operator=( RawObject &&x )
 {
 	if ( _type == kObject )
 	{
-		if ( &x != &_object ) // Not sure if this is necessary.  Do the STL types protect against self-assignment?
+		if ( &x != &_object ) // Not sure if this is necessary. Do the STL types protect against self-assignment?
 			_object = std::forward<RawObject>( x );
 	}
 	else
@@ -333,27 +336,73 @@ void Value::SetEmptyArray()
 	}
 }
 
-ETruthy Value::AsTruthy() const
+EResult Value::Convert( std::string &outX ) const
 {
 	switch ( _type )
 	{
 		case kNull:
-			return kFalsish;
+			outX.clear();
+			return kOK;
 
 		case kBool:
-			return _bool ? kTruish : kFalsish;
+			outX = _bool ? "true" : "false";
+			return kOK;
 
-		case kNumber:
+		case kDouble:
+		{
+			char temp[ 64 ];
+			snprintf( temp, sizeof(temp), "%g", _double );
+			char *comma = strchr( temp, ',' ); // Check if locale is using comma as digit separator
+			if ( comma )
+				*comma = '.';
+			outX = temp;
+			return kOK;
+		}
+
+		case kString:
+			outX = _string;
+			return kOK;
+
+		case kObject:
+		case kArray:
+			break;
+
+		default:
+			VJSON_ASSERT( false );
+			break;
+	}
+
+	// Cannot convert to string
+	return kWrongType;
+}
+
+EResult Value::Convert( bool &outX ) const
+{
+	switch ( _type )
+	{
+		case kNull:
+			outX = false;
+			return kOK;
+
+		case kBool:
+			outX = _bool;
+			return kOK;
+
+		case kDouble:
 			if ( _double == 0.0 )
-				return kFalsish;
+			{
+				outX = false;
+				return kOK;
+			}
 			if ( _double > 0.0 || _double < 0.0 )
-				return kTruish;
+			{
+				outX = true;
+				return kOK;
+			}
 			break; // NaN, etc
 
 		case kString:
 		{
-			if ( _string.empty() )
-				return kFalsish;
 			const char *s = _string.c_str();
 
 			// Manually do case-sensitive compare against "true" / "false".
@@ -366,7 +415,8 @@ ETruthy Value::AsTruthy() const
 				( s[3] == 'e' || s[3] == 'E' ) &&
 				s[4] == '\0'
 			) {
-				return kTruish;
+				outX = true;
+				return kOK;
 			}
 
 			if (
@@ -377,7 +427,20 @@ ETruthy Value::AsTruthy() const
 				( s[4] == 'e' || s[4] == 'E' ) &&
 				s[5] == '\0'
 			) {
-				return kFalsish;
+				outX = false;
+				return kOK;
+			}
+
+			// "0" and "1"
+			if ( s[0] == '0' && s[1] == '\0' )
+			{
+				outX = false;
+				return kOK;
+			}
+			if ( s[0] == '1' && s[1] == '\0' )
+			{
+				outX = true;
+				return kOK;
 			}
 		} break;
 
@@ -390,25 +453,127 @@ ETruthy Value::AsTruthy() const
 			break;
 	}
 
-	// Neither true nor false
-	return kGibberish;
-}
-
-EResult Value::GetTruthy( bool &outX ) const
-{
-	ETruthy t = AsTruthy();
-	if ( t == kTruish )
-	{
-		outX = true;
-		return kOK;
-	}
-	if ( t == kFalsish )
-	{
-		outX = false;
-		return kOK;
-	}
+	// Cannot convert to bool
 	return kWrongType;
 }
+
+EResult Value::Convert( double &outX ) const
+{
+	switch ( _type )
+	{
+		case kDouble:
+			outX = _double;
+			return kOK;
+
+		case kString:
+		{
+			double val;
+			int n = -1;
+			sscanf( _string.c_str(), "%lf%n %n", &val, &n, &n );
+			if ( n >= 0 && _string[n] == '\0' )
+			{
+				outX = val;
+				return kOK;
+			}
+			break;
+		}
+
+		case kNull:
+		case kObject:
+		case kArray:
+		case kBool:
+			break;
+
+		default:
+			VJSON_ASSERT( false );
+			break;
+	}
+
+	// Cannot convert to double
+	return kWrongType;
+}
+
+EResult Value::Convert( int &outX ) const
+{
+	switch ( _type )
+	{
+		case kDouble:
+			// Just truncate.  If they want something else, they should do their own conversion
+			outX = (int)_double;
+			return kOK;
+
+		case kString:
+		{
+			int val;
+			int n = -1;
+			sscanf( _string.c_str(), "%d%n %n", &val, &n, &n );
+			if ( n >= 0 && _string[n] == '\0' )
+			{
+				outX = val;
+				return kOK;
+			}
+			break;
+		}
+
+		case kNull:
+		case kObject:
+		case kArray:
+		case kBool:
+			break;
+
+		default:
+			VJSON_ASSERT( false );
+			break;
+	}
+
+	// Cannot convert to int
+	return kWrongType;
+}
+
+EResult Value::Convert( uint64_t &outX ) const
+{
+	switch ( _type )
+	{
+		case kDouble:
+			// Reject negative numbers and NAN
+			if ( !( _double >= 0.0 ) )
+				break;
+
+			// If you hit this assert, it means your values are getting
+			// truncated and you are in trouble!  You need to pass 64-bit
+			// numbers as strings in JSON!
+			VJSON_ASSERT( _double < (double)(1ULL << 53 ) );
+			outX = (uint64_t)_double;
+			return kOK;
+
+		case kString:
+		{
+			uint64_t val;
+			int n = -1;
+			sscanf( _string.c_str(), "%" PRIu64 "%n %n", &val, &n, &n );
+			if ( n >= 0 && _string[n] == '\0' )
+			{
+				outX = val;
+				return kOK;
+			}
+			break;
+		}
+
+		case kNull:
+		case kObject:
+		case kArray:
+		case kBool:
+			break;
+
+		default:
+			VJSON_ASSERT( false );
+			break;
+	}
+
+	// Cannot convert to int
+	return kWrongType;
+}
+
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -528,7 +693,7 @@ struct Printer
 			Reserve(
 				indent_len*indent_level // indent
 				+ 128 + (indent_len+4)*num_children // body
-				+(  ( (indent_len+2)*indent_level*indent_level )>>1 ) // unindent all levels
+				+( ( (indent_len+2)*indent_level*indent_level )>>1 ) // unindent all levels
 			);
 			buf.push_back( delim );
 			buf.push_back( '\n' );
@@ -678,10 +843,10 @@ struct Printer
 	}
 };
 
-std::string ToString( const Value &v, const PrintOptions &opt )
+std::string Value::PrintJSON( const PrintOptions &opt )
 {
 	Printer p( opt );
-	p.PrintValue( v );
+	p.PrintValue( *this );
 	return std::move( p.buf );
 }
 
@@ -773,7 +938,7 @@ struct Parser
 			}
 			else if ( *ptr == '/' && ptr+1 < end && ptr[1] == '/' && ctx.allow_cpp_comments )
 			{
-				// C++ comment.  Skip to the newline
+				// C++ comment. Skip to the newline
 				for (;;)
 				{
 
@@ -785,7 +950,7 @@ struct Parser
 							return;
 						if ( *ptr == '\r' )
 							++ptr;
-						break; // to outer loop.  keep eating whitespace / comments
+						break; // to outer loop. keep eating whitespace / comments
 					}
 					if ( *ptr == '\r' )
 					{
@@ -795,7 +960,7 @@ struct Parser
 							return;
 						if ( *ptr == '\n' )
 							++ptr;
-						break; // to outer loop.  keep eating whitespace / comments
+						break; // to outer loop. keep eating whitespace / comments
 					}
 
 					++ptr;
@@ -805,7 +970,7 @@ struct Parser
 			}
 			else
 			{
-				// Hit non-whitespace.  Time to stop
+				// Hit non-whitespace. Time to stop
 				break;
 			}
 		}
@@ -821,7 +986,7 @@ struct Parser
 		return false;
 	}
 
-	// Parse the 4 hex digits in an \u-escaped character.  Return the numeric value.
+	// Parse the 4 hex digits in an \u-escaped character. Return the numeric value.
 	// If input is bogus, error and return <0
 	int ParseUChar( const char *s )
 	{
@@ -868,7 +1033,7 @@ struct Parser
 			if ( s >= end )
 			{
 unterminated_string:
-				// Leave ptr at start of string.  Putting it at the end is usually useless,
+				// Leave ptr at start of string. Putting it at the end is usually useless,
 				// But sometimes it's hard to find a straw opening quote.
 				Error( "Unterminated string" );
 				return false;
@@ -887,7 +1052,7 @@ unterminated_string:
 				// since this is a common mistake and "control character"
 				// is overly technical
 				if ( *s == '\n' || *s == '\r' )
-					Errorf( "Newline character (0x%02x) in string.  (Missing closing quote?)", *s );
+					Errorf( "Newline character (0x%02x) in string. (Missing closing quote?)", *s );
 				else
 					Errorf( "Control character 0x%02x is illegal in string", *s );
 				return false;
@@ -937,11 +1102,12 @@ unterminated_string:
 					case 'r':
 					case 't':
 						// Two characters, which will be encoded as a single character
+						++s;
 						escape_overhead += 1;
 						break;
 
 					// Here we could add an option to allow for other escaped characters,
-					// for example a single quote.  JSON spec does not allow this, but it's
+					// for example a single quote. JSON spec does not allow this, but it's
 					// a common mistake when hand-editing
 
 					default:
@@ -980,17 +1146,17 @@ unterminated_string:
 			// Pre-allocate the output string.
 			// Ugggggg this is going to initialize the string with a
 			// bunch of zeros, which we are then going to overwrite below.
-			// The STL is just so insanely dumb sometimes.  We could use
+			// The STL is just so insanely dumb sometimes. We could use
 			// reserve() to avoid this, but that would mean we have to use
 			// push_back or append() below, which is going to be slower.
 			// It's probably faster to just suffer the memset here?
 			out.resize( s - ptr - escape_overhead );
 
-			// Get a writable pointer to the string.  Note that this const
+			// Get a writable pointer to the string. Note that this const
 			// cast is not necessary beginning with C++17
 			char *d = const_cast<char*>( out.data() );
 
-			// Re-scan tthe string, processing the escape sequences
+			// Re-scan the string, processing the escape sequences
 			while ( ptr < s )
 			{
 
@@ -1011,8 +1177,8 @@ unterminated_string:
 						case 'u':
 						{
 
-							// Parse the character.  Cast to unsigned because it should
-							// not have failed.  It somebody is missing with our buffer
+							// Parse the character. Cast to unsigned because it should
+							// not have failed. It somebody is missing with our buffer
 							// while we are reading from it, and we do actually fail,
 							// we'll handle that below
 							unsigned x = (unsigned)ParseUChar( ptr );
@@ -1047,15 +1213,15 @@ unterminated_string:
 
 						case '\"': *(d++) = '\"'; break;
 						case '\\': *(d++) = '\\'; break;
-						case '/':  *(d++) = '/';  break;
-						case 'b':  *(d++) = '\b'; break;
-						case 'f':  *(d++) = '\f'; break;
-						case 'n':  *(d++) = '\n'; break;
-						case 'r':  *(d++) = '\r'; break;
-						case 't':  *(d++) = '\t'; break;
+						case '/': *(d++) = '/'; break;
+						case 'b': *(d++) = '\b'; break;
+						case 'f': *(d++) = '\f'; break;
+						case 'n': *(d++) = '\n'; break;
+						case 'r': *(d++) = '\r'; break;
+						case 't': *(d++) = '\t'; break;
 
 						// Here we could add an option to allow for other escaped characters,
-						// for example a single quote.  JSON spec does not allow this, but it's
+						// for example a single quote. JSON spec does not allow this, but it's
 						// a common mistake when hand-editing
 
 						default:
@@ -1124,11 +1290,11 @@ unterminated_string:
 			}
 			++ptr;
 
-			// Add new entry at this key.  NOTE: JSON spec
+			// Add new entry at this key. NOTE: JSON spec
 			// does not specify what to do in case of duplicate key.
 			// We are not detecting it, and are using the "last one wins"
 			// rule.
-			Value &val = rawObj[ key ];
+			Value &val = rawObj[ std::move( key ) ];
 			if ( !ParseRequiredValue( val ) )
 				return false;
 
@@ -1150,7 +1316,7 @@ unterminated_string:
 			// Eat the comma
 			++ptr;
 
-			// End of object here?  (Extra trailing comma)
+			// End of object here? (Extra trailing comma)
 			SkipWhitespaceAndComments();
 			if ( !CheckEOF() )
 				return false;
@@ -1158,7 +1324,7 @@ unterminated_string:
 			{
 				if ( !ctx.allow_trailing_comma )
 				{
-					Errorf( "JSON value required here.  (Strict parsing mode; trailing comma not permitted)", *ptr, *ptr );
+					Errorf( "JSON value required here. (Strict parsing mode; trailing comma not permitted)", *ptr, *ptr );
 					return false;
 				}
 				++ptr;
@@ -1215,7 +1381,7 @@ unterminated_string:
 			// Eat the comma
 			++ptr;
 
-			// End of array here?  (Extra trailing comma)
+			// End of array here? (Extra trailing comma)
 			SkipWhitespaceAndComments();
 			if ( !CheckEOF() )
 				return false;
@@ -1223,7 +1389,7 @@ unterminated_string:
 			{
 				if ( !ctx.allow_trailing_comma )
 				{
-					Errorf( "JSON value required here.  (Strict parsing mode; trailing comma not permitted)", *ptr, *ptr );
+					Errorf( "JSON value required here. (Strict parsing mode; trailing comma not permitted)", *ptr, *ptr );
 					return false;
 				}
 				++ptr;
@@ -1238,11 +1404,11 @@ unterminated_string:
 	{
 		const char *start = ptr; // Save, so that we can rewind if we need to report error
 
-		// Copy characters into temp buffer.  We use a max size buffer here, which is NOT strictly
-		// according to JSON standard.  In practice, this seems very unlikely to matter.
+		// Copy characters into temp buffer. We use a max size buffer here, which is NOT strictly
+		// according to JSON standard. In practice, this seems very unlikely to matter.
 		// If anybody wants to fix this in a way that doesn't slow down the much more common
 		// case of a reasonable input (immediately resorting to dynamic allocation is an example
-		// of a method that does not fit this criteria), that would be great.  But I suspect
+		// of a method that does not fit this criteria), that would be great. But I suspect
 		// that in practice, supporting these numbers is not worth handling.
 		constexpr int N = 256;
 		char buf[N];
@@ -1281,7 +1447,7 @@ unterminated_string:
 				*(d++) = (char_to_store); \
 			} while ( false )
 
-		// Remaining digits before '.'?  Noter that JSON spec does not
+		// Remaining digits before '.'? Noter that JSON spec does not
 		// allow numbers with leading zeros.
 		char first_digit = d[-1];
 		if ( first_digit != '0' )
@@ -1311,8 +1477,8 @@ unterminated_string:
 
 			// Store whatever character atof will expect to use as the decimal point
 			// NOTE: Here we are assuming that decimal_point will point to a string
-			// of exactly one characters.  I am not aware of any locales for which
-			// this is not true.  Also, this code could be optimized if we assume that
+			// of exactly one characters. I am not aware of any locales for which
+			// this is not true. Also, this code could be optimized if we assume that
 			// the locale will not change.
 			STORE_CHARACTER( *localeconv()->decimal_point );
 
@@ -1368,7 +1534,7 @@ unterminated_string:
 		if ( sscanf( buf, "%lf", &number_val ) != 1 )
 		{
 			// Our parsing above should have made this impossible!
-			VJSON_ASSERT( "Parse bug" );
+			VJSON_ASSERT( !"Parse bug" );
 			ptr = start;
 			Error( "Invalid number" );
 			return false;
@@ -1416,7 +1582,7 @@ unterminated_string:
 			case '9':
 			case '-':
 			//case '.': case '+' // Should we enable a less-strict format where these are allowed?
-			// NOTE: Also we do not support inf and nan.  Those are illegal according to JSON spec, but it might be useful to add a flag to allow them.
+			// NOTE: Also we do not support inf and nan. Those are illegal according to JSON spec, but it might be useful to add a flag to allow them.
 				return ParseNumber( out );
 
 			case '{':
@@ -1462,14 +1628,14 @@ unterminated_string:
 
 };
 
-bool ParseValue( Value &out, const char *begin, const char *end, ParseContext *ctx )
+bool Value::ParseJSON( const char *begin, const char *end, ParseContext *ctx )
 {
 	VJSON_ASSERT( begin <= end );
 	ParseContext dummy_ctx;
 	Parser p( ctx ? *ctx : dummy_ctx, begin, end );
-	if ( !p.ParseRequiredValue( out ) )
+	if ( !p.ParseRequiredValue( *this ) )
 	{
-		out.SetNull();
+		SetNull();
 		return false;
 	}
 
@@ -1480,14 +1646,14 @@ bool ParseValue( Value &out, const char *begin, const char *end, ParseContext *c
 		return true;
 
 	p.Errorf( "Extra text starting with character '%c' (0x%02x)", c, c );
-	out.SetNull();
+	SetNull();
 	return false;
 }
 
 bool InternalParseTyped( Value &out, const char *begin, const char *end,
 	ParseContext *ctx, EValueType expected_type, const char *expected_type_name )
 {
-	if ( !ParseValue( out, begin, end, ctx ) )
+	if ( !out.ParseJSON( begin, end, ctx ) )
 		return false;
 	if ( out.Type() == expected_type )
 		return true;
@@ -1503,20 +1669,49 @@ bool InternalParseTyped( Value &out, const char *begin, const char *end,
 	return false;
 }
 
-bool ParseObject( Object &out, const char *begin, const char *end, ParseContext *ctx )
+bool Object::ParseJSON( const char *begin, const char *end, ParseContext *ctx )
 {
-	if ( InternalParseTyped( out, begin, end, ctx, kObject, "object" ) )
+	if ( InternalParseTyped( *this, begin, end, ctx, kObject, "object" ) )
 		return true;
-	out.SetEmptyObject(); // Type safety in case caller reuses
+	SetEmptyObject(); // Type safety in case caller reuses
 	return false;
 }
 
-bool ParseArray( Array &out, const char *begin, const char *end, ParseContext *ctx )
+//bool Array::ParseJSON( const char *begin, const char *end, ParseContext *ctx )
+//{
+//	if ( InternalParseTyped( *this, begin, end, ctx, kArray, "array" ) )
+//		return true;
+//	SetEmptyArray(); // Type safety in case caller reuses
+//	return false;
+//}
+
+// @VALVE>> Memory validation
+#ifdef DBGFLAG_VALIDATE
+void Value::Validate( CValidator &validator, const char *pchName ) const
 {
-	if ( InternalParseTyped( out, begin, end, ctx, kArray, "array" ) )
-		return true;
-	out.SetEmptyArray(); // Type safety in case caller reuses
-	return false;
+	switch (_type)
+	{
+		default:
+			Assert( false );
+		case kNull:
+		case kBool:
+		case kDouble:
+			break;
+
+		case kObject:
+			ValidateRecursive( _object );
+			break;
+
+		case kArray:
+			ValidateRecursive( _array );
+			break;
+
+		case kString:
+			ValidateRecursive( _string );
+			break;
+	}
 }
+#endif
+// @VALVE<<
 
 } // namespace vjson

@@ -2,10 +2,10 @@
 
 vjson is a lightweight but friendly-to-use JSON parser and DOM in C++.
 
-The most unique design goal of this library compared to the many
-alternatives is good ergonomics when traversing the DOM (see below).
-But here are some others:
+Design goals:
 
+- Good ergonomics when traversing the DOM (see below).  This is the most
+  unique goal among the many other libraries available.
 - Small: one ~700-line header, one .cpp file
 - No external dependencies.  (No, not even boost.)
 - Use STL containers for storage: ``std::vector`` for arrays;
@@ -14,25 +14,25 @@ But here are some others:
   ``const char *`` is possible in most places.
 - No use of exceptions, RTTI, ``iostream``, etc.
 - DOM-style interface: read the whole document into some data
-  structures at once.  No SAX-style (streaming) interface.
+  structures at once.  (No SAX-style / treaming) interface.)
 - Parser only accepts the document as memory block, so entire source must
-  fit in memory.  (``istream``, ``FILE*``, iterator interface, etc)
+  fit in memory.  (No ``istream``, ``FILE*``, iterator interface, etc)
 - Printing options: Some basic options for minified or indented.
-  No framework for detailed customization.
+  (No framework for detailed customization.)
 - If parsing fails, provide a good error message with a line number
   (important for "pretty" / hand-edited JSON) and byte offset (important
   for "minified" JSON).
 - Parsing options: Comments and trailing commas can be optionally ignored.
 
-Here are some goals this library doesn't have.  (Try some of the ones listed
-below.)
+Here are some goals this library doesn't have.  (If you beed these, try
+one of the other libraries below.)
 
 - Remember formatting or comments, to support automated modification of
   documents
 - Super-fast or efficient.  This lib aims to not be *grossly* inefficient,
-  but it also aims to avoid doing too much weird/complicated stuff in the
-  name of efficiency.  See some of the libs below if you need fast
-  parsing, or to load in huge documents.
+  but it also avoids weird/complicated stuff in the name of efficiency.
+  See some of the libs below if you need fast parsing or to load in huge
+  documents.
 - Header-only library.  I consider putting all the guts of the parsing code
   in a header an anti-pattern.
 - Super streamlined syntax for constructing a DOM in C++ code
@@ -51,20 +51,25 @@ to write code to load up a file.  Specifically:
 - Make it easy to deal with 64-bit numbers as strings.  (JSON only
   supports "numbers", which are usually represented as doubles.  A 64-bit
   value encoded as a "number" is very likely to be mutated in transit.)
-  FIXME - haven't actually added the To<> and Cast<> operatons yet.
-  Will probably also replace the shimsical truthy stuff with To<bool>
 
 If you want to be extremely strict about extra/missing keys, values of the
 wrong type, etc. then there really is no shortcut for writing detailed,
-explicit error handling.  vjson makes it easy write that kind of code when
-the situation calls for it.  It's when you have the more modest aim
-of doing "something reasonable" with a malformed document, with the least
-amount of effort possible, that vjson shines.  If a key is missing, supply
-the default in a single function call.  If an array or object is missing,
-act as if it is empty.  If a value is present, but the wrong type, act as
-if it it missing.  When loadingparsing a document that is supposed to be a
-single JSON object, just fail if the input is some other JSON value, and
-don't make me write an explicit check for that case.
+explicit error handling.  vjson makes it easy to write that kind of code when
+the situation calls for it.  But most of us have the more modest aim of
+"detect common errors, but otherwise just do 'something reasonable' with
+a malformed document, with the least amount of coding effort possible".
+That's when vjson shines.  For example:
+
+- If a key is missing, it can supply the default in a single function call.
+- If an array or object is missing, return an empty one.
+- If a value is present at the given key, but the wrong type, just act as
+  if it it missing.
+- If an array is only suoposed to contain a certin type of value, iterate
+  over the elements with that type in an idiomatic way, ignoring any elements
+  that are the wrong type.
+- When loading/parsing a document that is supposed to be a single JSON object,
+  just fail if the input is some other JSON value, and don't make me write
+  an explicit check for that case.
 
 TL;DR: Error handling should not constitute the majority of the code to
 load up a document, when your goal is simply "do something reasonable and
