@@ -2,44 +2,31 @@
 
 #include <gtest/gtest.h>
 
-void CheckTruthy( const vjson::Value &v, vjson::ETruthy expected )
+void CheckGet( const vjson::Value &obj, const char *key )
 {
-	EXPECT_EQ( v.AsTruthy(), expected );
+	const vjson::Value &val = obj.AtKey( key );
+	const char *light_fantastic = "The Light Fantastic";
 
-	bool truth_val = false;;
-	switch ( expected )
+	if ( !val.IsBool() )
 	{
-		case vjson::kTruish:
-			EXPECT_TRUE( v.IsTruish() );
-			EXPECT_FALSE( v.IsFalsish() );
-			truth_val = false;
-			EXPECT_EQ( v.GetTruthy( truth_val ), vjson::kOK );
-			EXPECT_TRUE( truth_val );
-			break;
-
-		case vjson::kFalsish:
-			EXPECT_FALSE( v.IsTruish() );
-			EXPECT_TRUE( v.IsFalsish() );
-			truth_val = true;
-			EXPECT_EQ( v.GetTruthy( truth_val ), vjson::kOK );
-			EXPECT_FALSE( truth_val );
-			break;
-
-		case vjson::kGibberish:
-			EXPECT_FALSE( v.IsTruish() );
-			EXPECT_FALSE( v.IsFalsish() );
-			EXPECT_EQ( v.GetTruthy( truth_val ), vjson::kWrongType );
-			break;
-
-		default:
-			FAIL();
+		EXPECT_TRUE( val.GetBool( true ) );
+		EXPECT_FALSE( val.GetBool( false ) );
+		EXPECT_FALSE( val.GetBool() );
+		EXPECT_TRUE( val.BoolAtKey( key, true ) );
+		EXPECT_FALSE( val.BoolAtKey( key, false ) );
+		EXPECT_FALSE( val.BoolAtKey( key ) );
 	}
-}
-
-void CheckTruthyAtKey( const vjson::Object &obj, const char *key, vjson::ETruthy expected )
-{
-	EXPECT_EQ( obj.TruthyAtKey( key ), expected );
-	CheckTruthy( obj.AtKey( key ), expected );
+	if ( !val.IsString() )
+	{
+		EXPECT_EQ( val.GetCString(), nullptr );
+		EXPECT_EQ( obj.CStringAtKey( key ), nullptr );
+		EXPECT_EQ( (void *)val.GetCString( light_fantastic ), (void*)light_fantastic ); // Make sure POINTER is equal, not string
+		EXPECT_EQ( (void *)obj.CStringAtKey( key, light_fantastic ), (void*)light_fantastic ); // Make sure POINTER is equal, not string
+		EXPECT_EQ( val.GetString(), "" );
+		EXPECT_EQ( val.GetString( light_fantastic + 4 ), "Light Fantastic" );
+		EXPECT_EQ( obj.StringAtKey( key ), "" );
+		EXPECT_EQ( obj.StringAtKey( key, light_fantastic + 4 ), "Light Fantastic" );
+	}
 }
 
 // Load up a basic example document that demonstrates most basic JSON features,
@@ -48,7 +35,7 @@ TEST(Misc, Basic) {
 
 	vjson::ParseContext ctx;
 	vjson::Object doc;
-	EXPECT_TRUE( vjson::ParseObject( doc,
+	EXPECT_TRUE( doc.ParseJSON(
 R"JSON({
 	"null": null,
 	"true": true,
@@ -61,139 +48,170 @@ R"JSON({
 	"negative_one": -1,
 	"zero_float": 0.0,
 	"float": 123.45,
+	"uint64_as_string": "123456789",
+	"big_double": 12345678900000,
+	"double_exponents": [ 123e45, 1.23e45, 123e-45, 1.23E-45 ],
+	"neg_double_exponents": [ -123e45, -1.23e45, -123e-45, -1.23E-45 ],
 	"empty_array": [],
 	"array_123": [ 1, 2, 3 ],
-	"empty_object": {}
-})JSON", &ctx ) ) << "Parse failed.  " << ctx.error_message;
+	"empty_object": {},
+	"string_escaped_characters": "tab\tand\nnewline",
+	"tab\tin\tkey": null,
+	"array_of_objects": [
+		{ "key1": "value1" },
+		{ "key2": 2 },
+		{ "key3": false },
+		{ "key4": [ "hello", "world" ] },
+	]
+})JSON", &ctx ) ) << "Parse failed line " << ctx.error_line << " " << ctx.error_message;
 
 	// Exercise a bunch of basic accessors on the root document object
 	ASSERT_EQ( doc.Type(), vjson::kObject );
 	EXPECT_TRUE( doc.IsObject() );
 	EXPECT_TRUE( &doc.AsObject() == &doc );
-	EXPECT_TRUE( &doc.AsObjectOrEmpty() == &doc );
-	EXPECT_TRUE( doc.AsObjectPtr() == &doc );
-	EXPECT_TRUE( doc.AsArrayPtr() == nullptr );
-	CheckTruthy( doc, vjson::kGibberish );
+	EXPECT_TRUE( &doc.GetObjectOrEmpty() == &doc );
+	EXPECT_TRUE( doc.GetObjectPtr() == &doc );
+	EXPECT_TRUE( doc.GetArrayPtr() == nullptr );
+
+	bool boolVal;
+	std::string stringVal;
+	double doubleVal;
+	int intVal;
+	uint64_t uint64Val;
 
 	// Check each of the subkeys
 
 	{
 		ASSERT_TRUE( doc.HasKey( "null" ) );
+		EXPECT_TRUE( doc.ValuePtrAtKey("null")->IsNull() );
 		EXPECT_TRUE( doc["null"].IsNull() );
 		EXPECT_TRUE( doc["null"].Is<nullptr_t>() );
-		EXPECT_TRUE( doc.ValuePtrAtKey("null")->IsNull() );
-		CheckTruthyAtKey( doc, "null", vjson::kFalsish );
+
+		CheckGet( doc, "null" );
+
+		boolVal = true;
+		EXPECT_EQ( doc.ConvertAtKey( "null", boolVal ), vjson::kOK );
+		EXPECT_FALSE( boolVal );
+
+		doubleVal = 123;
+		EXPECT_EQ( doc.ConvertAtKey( "null", doubleVal ), vjson::kOK );
+		EXPECT_EQ( doubleVal, 0.0 );
+
+		stringVal = "hello";
+		EXPECT_EQ( doc.ConvertAtKey( "null", stringVal ), vjson::kOK );
+		EXPECT_EQ( stringVal, "" );
 	}
 
 	{
-		bool val;
-
 		ASSERT_TRUE( doc.HasKey( "true" ) );
 		EXPECT_TRUE( doc["true"].IsBool() );
 		EXPECT_TRUE( doc["true"].Is<bool>() );
-		EXPECT_TRUE( doc["true"].AsBool( false ) );
 		EXPECT_TRUE( doc["true"].AsBool() );
 		EXPECT_TRUE( doc["true"].As<bool>() );
+		EXPECT_TRUE( doc["true"].GetBool( false ) );
 
-		val = false;
-		EXPECT_EQ( doc["true"].Get( val ), vjson::kOK );
-		EXPECT_TRUE( val );
+		CheckGet( doc, "true" );
 
-		EXPECT_TRUE( doc.BoolAtKey("true", false ) );
+		boolVal = false;
+		EXPECT_EQ( doc["true"].Convert( boolVal ), vjson::kOK );
+		EXPECT_TRUE( boolVal );
 
-		val = false;
-		EXPECT_EQ( doc.GetAtKey("true", val ), vjson::kOK );
-		EXPECT_TRUE( val );
+		boolVal = false;
+		EXPECT_EQ( doc.ConvertAtKey("true", boolVal ), vjson::kOK );
+		EXPECT_TRUE( boolVal );
 
-		CheckTruthyAtKey( doc, "true", vjson::kTruish );
+		stringVal = "hello";
+		EXPECT_EQ( doc.ConvertAtKey("true", stringVal ), vjson::kOK );
+		EXPECT_EQ( stringVal, "true" );
 	}
 
 	{
-		bool val;
-
 		ASSERT_TRUE( doc.HasKey( "false" ) );
 		EXPECT_TRUE( doc["false"].IsBool() );
 		EXPECT_TRUE( doc["true"].Is<bool>() );
-		EXPECT_FALSE( doc["false"].AsBool( true ) );
 		EXPECT_FALSE( doc["false"].AsBool() );
 		EXPECT_FALSE( doc["false"].As<bool>() );
+		EXPECT_FALSE( doc["false"].GetBool( true ) );
 
-		val = true;
-		EXPECT_EQ( doc["false"].Get( val ), vjson::kOK );
-		EXPECT_FALSE( val );
+		CheckGet( doc, "false" );
+
+		boolVal = true;
+		EXPECT_EQ( doc["false"].Convert( boolVal ), vjson::kOK );
+		EXPECT_FALSE( boolVal );
 
 		EXPECT_FALSE( doc.BoolAtKey("false", false ) );
 
-		val = true;
-		EXPECT_EQ( doc.GetAtKey("false", val ), vjson::kOK );
-		EXPECT_FALSE( val );
-
-		CheckTruthyAtKey( doc, "false", vjson::kFalsish );
+		boolVal = true;
+		EXPECT_EQ( doc.ConvertAtKey("false", boolVal ), vjson::kOK );
+		EXPECT_FALSE( boolVal );
 	}
 
 	{
-		std::string sval;
-		const char *cval;
-
 		ASSERT_TRUE( doc.HasKey( "empty_string" ) );
 
 		EXPECT_TRUE( doc["empty_string"].IsString() );
 		EXPECT_TRUE( doc["empty_string"].Is<std::string>() );
 		EXPECT_TRUE( doc["empty_string"].Is<const char *>() );
 
-		EXPECT_TRUE( doc["empty_string"].AsString( "a non-empty string" ).empty() );
+		EXPECT_TRUE( doc["empty_string"].GetString( "a non-empty string" ).empty() );
 		EXPECT_TRUE( doc["empty_string"].AsString().empty() );
 		EXPECT_TRUE( doc["empty_string"].As<std::string>().empty() );
 
-		EXPECT_TRUE( doc["empty_string"].AsCString( "a non-empty string" ) == doc["empty_string"].AsString().c_str() );
+		EXPECT_TRUE( doc["empty_string"].GetCString( "a non-empty string" ) == doc["empty_string"].AsString().c_str() );
 		EXPECT_TRUE( doc["empty_string"].AsCString() == doc["empty_string"].AsString().c_str() );
 		EXPECT_TRUE( doc["empty_string"].As<const char *>() == doc["empty_string"].AsCString() );
 
-		sval = "bogus";
-		EXPECT_EQ( doc["empty_string"].Get( sval ), vjson::kOK );
-		EXPECT_TRUE( sval.empty() );
+		CheckGet( doc, "empty_string" );
 
-		cval = "bogus";
-		EXPECT_EQ( doc["empty_string"].Get( cval ), vjson::kOK );
-		EXPECT_TRUE( *cval == '\0' );
+		boolVal = false;
+		EXPECT_EQ( doc["empty_string"].Convert( boolVal ), vjson::kWrongType );
+		EXPECT_TRUE( boolVal );
 
-		CheckTruthyAtKey( doc, "empty_string", vjson::kFalsish ); // Empty string is falsish
+		boolVal = true;
+		EXPECT_EQ( doc.ConvertAtKey("empty_string", boolVal ), vjson::kWrongType );
+		EXPECT_TRUE( boolVal );
+
+		stringVal = "nonempty";
+		EXPECT_EQ( doc["empty_string"].Convert( stringVal ), vjson::kOK );
+		EXPECT_TRUE( stringVal.empty() );
+
+		stringVal = "nonempty";
+		EXPECT_EQ( doc.ConvertAtKey("empty_string", stringVal ), vjson::kOK );
+		EXPECT_TRUE( stringVal.empty() );
 	}
 
 	{
-		std::string sval;
-		const char *cval;
-
 		ASSERT_TRUE( doc.HasKey( "true_string" ) );
 
 		EXPECT_TRUE( doc["true_string"].IsString() );
 		EXPECT_TRUE( doc["true_string"].Is<std::string>() );
 		EXPECT_TRUE( doc["true_string"].Is<const char *>() );
 
-		EXPECT_STREQ( doc["true_string"].AsString( "Jabberwocky" ).c_str(), "true" );
+		EXPECT_STREQ( doc["true_string"].GetString( "Jabberwocky" ).c_str(), "true" );
 		EXPECT_STREQ( doc["true_string"].AsString().c_str(), "true" );
 		EXPECT_STREQ( doc["true_string"].As<std::string>().c_str(), "true" );
 
-		EXPECT_TRUE( doc["true_string"].AsCString( "Jabberywocky" ) == doc["true_string"].AsString().c_str() );
+		EXPECT_TRUE( doc["true_string"].GetCString( "Jabberywocky" ) == doc["true_string"].AsString().c_str() );
 		EXPECT_TRUE( doc["true_string"].AsCString() == doc["true_string"].AsString().c_str() );
 		EXPECT_TRUE( doc["true_string"].As<const char *>() == doc["true_string"].AsCString() );
 
-		sval = "bogus";
-		EXPECT_EQ( doc["true_string"].Get( sval ), vjson::kOK );
-		EXPECT_STREQ( sval.c_str(), "true" );
+		CheckGet( doc, "true_string" );
 
-		cval = "bogus";
-		EXPECT_EQ( doc["true_string"].Get( cval ), vjson::kOK );
-		EXPECT_STREQ( cval, "true" );
+		stringVal = "bogus";
+		EXPECT_EQ( doc["true_string"].Convert( stringVal ), vjson::kOK );
+		EXPECT_STREQ( stringVal.c_str(), "true" );
 
-		CheckTruthyAtKey( doc, "true_string", vjson::kTruish ); // The string "true" is truish
+		stringVal = "bogus";
+		EXPECT_EQ( doc["true_string"].Convert( stringVal ), vjson::kOK );
+		EXPECT_EQ( stringVal, "true" );
+
+		boolVal = false;
+		EXPECT_EQ( doc["true_string"].Convert( boolVal ), vjson::kOK );
+		EXPECT_TRUE( boolVal );
+		EXPECT_FALSE( doc["true_string"].GetBool( false ) );
 	}
-	CheckTruthyAtKey( doc, "false_string", vjson::kFalsish ); // The string "false" is truish
 
 	EXPECT_FALSE( doc.HasKey( "bogus_key" ) );
-	EXPECT_EQ( doc.TruthyAtKey( "bogus_key" ), vjson::kGibberish );
-	EXPECT_FALSE( doc.IsTruishAtKey( "bogus_key" ) );
-	EXPECT_FALSE( doc.IsFalsishAtKey( "bogus_key" ) );
 }
 
 int main(int argc, char **argv) {
