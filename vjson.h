@@ -11,13 +11,18 @@
 
 #include <string.h>
 #include <stdint.h>
+#include <stddef.h>
+#include <inttypes.h>
 #include <string>
 #include <vector>
 #include <map>
 
 // @VALVE Memory validation, etc
-#include <tier0/dbgflag.h>
-#include <tier0/validator.h>
+#include <tier0/dbg.h>
+#ifdef DBGFLAG_VALIDATE
+	#include <tier0/validator.h>
+#endif
+#include <tier0/memdbgoff.h>
 #define VJSON_ASSERT Assert
 
 // #define VJSON_ASSERT to something else if you want to customize
@@ -83,20 +88,20 @@ using RawObject = std::map<std::string, Value, ObjectKeyLess>; // Internal stora
 using RawArray = std::vector<Value>; // Internal storage for arrays
 using ObjectItem = RawObject::value_type; // A.k.a. std::pair<const std::string,Value>. You'll get a reference to this when you iterate an Object
 template<typename T> struct TypeTraits {};
-template<> struct TypeTraits<nullptr_t> { static constexpr EValueType kType = kNull; using AsReturnType = void; using AsReturnTypeConst = void; };
+template<> struct TypeTraits<std::nullptr_t> { static constexpr EValueType kType = kNull; using AsReturnType = void; using AsReturnTypeConst = void; };
 template<> struct TypeTraits<bool> { static constexpr EValueType kType = kBool; using AsReturnType = bool&; using AsReturnTypeConst = const bool&; };
 template<> struct TypeTraits<double> { static constexpr EValueType kType = kDouble; using AsReturnType = double&; using AsReturnTypeConst = const double&; };
 template<> struct TypeTraits<int> { static constexpr EValueType kType = kNumber; using AsReturnType = int; using AsReturnTypeConst = int; };
 template<> struct TypeTraits<const char *> { static constexpr EValueType kType = kString; using AsReturnType = const char *; using AsReturnTypeConst = const char *; };
 template<> struct TypeTraits<std::string> { static constexpr EValueType kType = kString; using AsReturnType = std::string &; using AsReturnTypeConst = const std::string &; };
 template<> struct TypeTraits<Object> { static constexpr EValueType kType = kObject; using AsReturnType = Object &; using AsReturnTypeConst = const Object &; };
-template<> struct TypeTraits<Array> { static constexpr EValueType kType = kObject; using AsReturnType = Array &; using AsReturnTypeConst = const Array &; };
+template<> struct TypeTraits<Array> { static constexpr EValueType kType = kArray; using AsReturnType = Array &; using AsReturnTypeConst = const Array &; };
 template<typename T, typename V, typename A, typename R> struct ArrayIter;
-template<typename T> using ConstArrayIter = ArrayIter<T, const Value *, const RawArray &, typename TypeTraits<T>::AsReturnTypeConst >;
-template<typename T> using MutableArrayIter = ArrayIter<T, Value *, RawArray &, typename TypeTraits<T>::AsReturnType >;
-template<typename T, typename V, typename A, typename I> struct ArrayRange;
-template<typename T> using ConstArrayRange = ArrayRange< T, const Value *, const RawArray &, ConstArrayIter<T> >;
-template<typename T> using MutableArrayRange = ArrayRange< T, Value *, RawArray &, MutableArrayIter<T> >;
+template<typename T> using ConstArrayIter = ArrayIter<T, const Value, const RawArray, typename TypeTraits<T>::AsReturnTypeConst >;
+template<typename T> using MutableArrayIter = ArrayIter<T, Value, RawArray, typename TypeTraits<T>::AsReturnType >;
+template<typename T, typename A, typename I> struct ArrayRange;
+template<typename T> using ConstArrayRange = ArrayRange< T, const RawArray, ConstArrayIter<T> >;
+template<typename T> using MutableArrayRange = ArrayRange< T, RawArray, MutableArrayIter<T> >;
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -158,11 +163,11 @@ public:
 	Value() : _type( kNull ) {}
 
 	// Construct value with the given kind and default value for that kind (0 or empty)
-	Value( EValueType type );
+	explicit Value( EValueType type );
 
 	// Basic C++ object lifetime stuff
 	Value( const Value &x ) { InternalConstruct( x ); }
-	Value( Value &&x ) { InternalConstruct( x ); }
+	Value( Value &&x ) { InternalConstruct( std::forward<Value>( x ) ); }
 	~Value() { InternalDestruct(); }
 
 	// Construct directly from primitive values.
@@ -172,7 +177,7 @@ public:
 	Value( const char * x );
 	Value( const std::string &x );
 	Value( std::string && x );
-	Value( nullptr_t ) = delete; // To avoid confusion. Use default constructor or kNull
+	Value( std::nullptr_t ) = delete; // To avoid confusion. Use default constructor or kNull
 
 	// Construct from internal object/array storage
 	Value( const RawObject & x );
@@ -189,7 +194,7 @@ public:
 	Value &operator=( const char * x );
 	Value &operator=( const std::string &x );
 	Value &operator=( std::string && x );
-	Value &operator=( nullptr_t ) { SetNull(); return *this; }
+	Value &operator=( std::nullptr_t ) { SetNull(); return *this; }
 	Value &operator=( const RawArray & x );
 	Value &operator=( RawArray && x );
 	Value &operator=( const RawObject & x );
@@ -206,10 +211,96 @@ public:
 	template <typename T> void SetArray( std::initializer_list<T> x ) { SetArray( x.begin(), x.end() ); }; // E.g. SetArray( { "one", "two", "three" } ); Note that they must all be the same type. (If not, wrap all with Value constructors.)
 
 	//
-	// Type checking
+	// Read this Value as a specific data type.
+	// There are several different options depending on what checking/conversions
+	// you want to do.
+	//
+
+	// Get this value as the specified type. If the value is not the exact
+	// JSON type, returns a default.  No "conversions" are attempted.
+	const char *  AsCString      ( const char *       defaultVal ) const { return _type == kString ? _string.c_str() : defaultVal; }
+	std::string   AsString       ( const char *       defaultVal ) const { return _type == kString ? _string : std::string( defaultVal ); } // NOTE: always returns a copy
+	std::string   AsString       ( const std::string &defaultVal ) const { return _type == kString ? _string : defaultVal; } // NOTE: always returns a copy, because defaultVal could be a temp!
+	std::string   AsString       ( std::string &&     defaultVal ) const { return _type == kString ? _string : std::forward<std::string>(defaultVal); } // Avoids copy if defaultVal is rvalue
+	bool          AsBool         ( bool               defaultVal ) const { return _type == kBool   ? _bool : defaultVal; } // NOTE: requires exact bool type!
+	double        AsDouble       ( double             defaultVal ) const { return _type == kDouble ? _double : defaultVal; }
+	int           AsInt          ( int                defaultVal ) const { return _type == kDouble ? (int)_double : defaultVal; }
+	const Object *AsObjectPtr    (                               ) const { return _type == kObject ? (const Object *)this : nullptr; } // Returns null if this is not object
+	Object       *AsObjectPtr    (                               )       { return _type == kObject ? (      Object *)this : nullptr; }
+	const Array  *AsArrayPtr     (                               ) const { return _type == kArray  ? (const Array  *)this : nullptr; } // Returns null if this is not array
+	Array        *AsArrayPtr     (                               )       { return _type == kArray  ? (      Array  *)this : nullptr; }
+	const Object &AsObjectOrEmpty(                               ) const { return _type == kObject ? *(const Object *)this : GetStaticEmptyObject(); } // Returns empty object if this is not an object
+	const Array  &AsArrayOrEmpty (                               ) const { return _type == kArray  ? *(const Array  *)this : GetStaticEmptyArray(); } // Returns empty array if this is not an array
+
+	// Get the value as the specified type, performing the following
+	// conversions if the type is not already the correct type:
+	//
+	// - Interpreting as std::string:
+	//     - numbers as printed
+	//     - bools are converted to "true" / "false"
+	//     - null is mapped to the empty string
+	// - Interpreting as bool:
+	//     - input strings "false", "true", "0", and "1" are supported
+	//       (case insensitive).  All other strings fail.
+	//     - null is mapped to false
+	//     - the number 0 (exactly) is mapped false, all other numbers are
+	//       mapped to true.  (Inf and nan fail to convert)
+	// - Interpreting as double, int, and uint64_t:
+	//     - strings are parsed if possible.  A string that contains a floating point value
+	//       will fail to convert to int of uint64_t.  (If you want to allow this, then convert
+	//       to double first and then do the cast yourself.)
+	//     - bools map to 0 / 1
+	//     - doubles are cast/truncated when converted to int
+	//       If the double value is converted to uint64 and exceeds the range that
+	//       can be represented exactly in a double, an assert is triggered as this
+	//       is almost always an indication of a problem.  (If you don't need the precision,
+	//       just convert to double and then cast yourself!)
+	// 
+	// Arrays and objects always fail to convert to any destination type.
+	// Returns kOK on success, kWrongType on failure.
+	// Usually you will call one of the InterpretAsXxx functions below
+	EResult TryInterpret( std::string &outVal ) const;
+	EResult TryInterpret( bool        &outVal ) const;
+	EResult TryInterpret( double      &outVal ) const;
+	EResult TryInterpret( int         &outVal ) const;
+	EResult TryInterpret( uint64_t    &outVal ) const;
+
+	// Same as TryInterpret(), but returns your supplied default value if conversion fails
+	std::string InterpretAsString( const char *       defaultVal ) const { std::string result; if ( TryInterpret( result ) != kOK ) result = defaultVal; return result; }
+	std::string InterpretAsString( const std::string &defaultVal ) const { std::string result; if ( TryInterpret( result ) != kOK ) result = defaultVal; return result; }
+	std::string InterpretAsString( std::string &&     defaultVal ) const { std::string result( std::forward<std::string>( defaultVal ) ); TryInterpret( result ); return result; }
+	bool        InterpretAsBool  ( bool               defaultVal ) const { TryInterpret( defaultVal ); return defaultVal; }
+	double      InterpretAsDouble( double             defaultVal ) const { TryInterpret( defaultVal ); return defaultVal; }
+	int         InterpretAsInt   ( int                defaultVal ) const { TryInterpret( defaultVal ); return defaultVal; }
+	uint64      InterpretAsUint64( uint64_t           defaultVal ) const { TryInterpret( defaultVal ); return defaultVal; }
+
+	// Perform a blind "static cast" of the value to the specified type. The value must
+	// be the exact type; no conversions or type checks are attempted; these will assert
+	// and do other undefined behaviour if called on the wrong type.  You can use these
+	// if you have already done a type check.
+	const char *       GetCString() const { VJSON_ASSERT( _type == kString ); return _string.c_str(); }
+	const std::string &GetString () const { VJSON_ASSERT( _type == kString ); return _string; }
+	std::string &      GetString ()       { VJSON_ASSERT( _type == kString ); return _string; }
+	const bool &       GetBool   () const { VJSON_ASSERT( _type == kBool   ); return _bool; }
+	bool &             GetBool   ()       { VJSON_ASSERT( _type == kBool   ); return _bool; }
+	const double &     GetDouble () const { VJSON_ASSERT( _type == kDouble ); return _double; }
+	double &           GetDouble ()       { VJSON_ASSERT( _type == kDouble ); return _double; }
+	int                GetInt    () const { VJSON_ASSERT( _type == kDouble ); return (int)_double; }
+	const Object &     GetObject () const { VJSON_ASSERT( _type == kObject ); return *(const Object*)this; }
+	Object &           GetObject ()       { VJSON_ASSERT( _type == kObject ); return *(Object*)this; }
+	const Array &      GetArray  () const { VJSON_ASSERT( _type == kArray  ); return *(const Array*)(this); }
+	Array &            GetArray  ()       { VJSON_ASSERT( _type == kArray  ); return *(Array*)this; }
+
+	// Template-style Get<T> for the GetXxxxx static-cast methods above.
+	// (See full list of specializations at the bottom of this file.)
+	template<typename T> typename TypeTraits<T>::AsReturnTypeConst Get() const;
+	template<typename T> typename TypeTraits<T>::AsReturnType Get();
+
+	//
+	// Explicit type checking
 	//
 	// NOTE: One of the goals of this library is to reduce the amount of
-	// tedius type checking that must be done when traversing the DOM. If you
+	// tedious type checking that must be done when traversing the DOM. If you
 	// just wish to ignore missing or wrongly typed data, there's usually
 	// a way to avoid an explicit type check!
 	//
@@ -231,78 +322,6 @@ public:
 	EValueType Type() const { return _type; }
 
 	//
-	// Read this Value as a specific data type.
-	// There are several different options depending on what checking/conversions
-	// you want to do.
-	//
-
-	// Perform a blind "static cast" of the value to the specified type. The value must
-	// be already be the exact type; no conversions or type checks are attempted.
-	// These will assert/crash if called on the wrong type.
-	const char *       AsCString() const { VJSON_ASSERT( _type == kString ); return _string.c_str(); }
-	const std::string &AsString () const { VJSON_ASSERT( _type == kString ); return _string; }
-	std::string &      AsString ()       { VJSON_ASSERT( _type == kString ); return _string; }
-	const bool &       AsBool   () const { VJSON_ASSERT( _type == kBool   ); return _bool; }
-	bool &             AsBool   ()       { VJSON_ASSERT( _type == kBool   ); return _bool; }
-	const double &     AsDouble () const { VJSON_ASSERT( _type == kDouble ); return _double; }
-	double &           AsDouble ()       { VJSON_ASSERT( _type == kDouble ); return _double; }
-	int                AsInt    () const { VJSON_ASSERT( _type == kDouble ); return (int)_double; }
-	const Object &     AsObject () const { VJSON_ASSERT( _type == kObject ); return *(const Object*)this; }
-	Object &           AsObject ()       { VJSON_ASSERT( _type == kObject ); return *(Object*)this; }
-	const Array &      AsArray  () const { VJSON_ASSERT( _type == kArray  ); return *(const Array*)(this); }
-	Array &            AsArray  ()       { VJSON_ASSERT( _type == kArray  ); return *(Array*)this; }
-
-	// Template-style As<T> for the AsXxxxx static-cast methods above.
-	// (See full list of specializations at the bottom of this file.)
-	template<typename T> typename TypeTraits<T>::AsReturnTypeConst As() const;
-	template<typename T> typename TypeTraits<T>::AsReturnType As();
-
-	// Get this value as the specified type. If the value is not the exact
-	// JSON type, returns a default.  No "conversions" are attempted.
-	const char *  GetCString      ( const char *       defaultVal = nullptr ) const { return _type == kString ? _string.c_str() : defaultVal; }
-	std::string   GetString       ( const char *       defaultVal = ""      ) const { return _type == kString ? _string : std::string( defaultVal ); } // NOTE: always returns a copy
-	std::string   GetString       ( const std::string &defaultVal           ) const { return _type == kString ? _string : defaultVal; } // NOTE: always returns a copy, because defaultVal could be a temp!
-	bool          GetBool         ( bool               defaultVal = false   ) const { return _type == kBool   ? _bool : defaultVal; } // NOTE: requires exact bool type!
-	double        GetDouble       ( double             defaultVal = 0.0     ) const { return _type == kDouble ? _double : defaultVal; }
-	int           GetInt          ( int                defaultVal = 0       ) const { return _type == kDouble ? (int)_double : defaultVal; }
-	const Object *GetObjectPtr    (                                         ) const { return _type == kObject ? (const Object *)this : nullptr; }
-	Object       *GetObjectPtr    (                                         )       { return _type == kObject ? (      Object *)this : nullptr; }
-	const Array  *GetArrayPtr     (                                         ) const { return _type == kArray  ? (const Array  *)this : nullptr; }
-	Array        *GetArrayPtr     (                                         )       { return _type == kArray  ? (      Array  *)this : nullptr; }
-	const Object &GetObjectOrEmpty(                                         ) const { return _type == kObject ? *(const Object *)this : GetStaticEmptyObject(); }
-	const Array  &GetArrayOrEmpty (                                         ) const { return _type == kArray  ? *(const Array  *)this : GetStaticEmptyArray(); }
-
-	// Get the value as the specified type, performing the following
-	// conversions if the type is not already the correct type:
-	//
-	// - Converting to std::string:
-	//     - numbers as printed
-	//     - bools are converted to "true" / "false"
-	//     - null is mapped to the empty string
-	// - Converting to bool:
-	//     - input strings "false", "true", "0", and "1" are supported (case insensitive).  All other strings fail.
-	//     - null is mapped to false
-	//     - the number 0 (exactly) is mapped false, all other numbers are mapped to true.  (Inf and nan fail to convert)
-	// - Converting to double, int, and uint64_t:
-	//     - strings are parsed if possible.  A string that contains a floating point value
-	//       will fail to convert to int of uint64_t.  (If you want to allow this, then convert
-	//       to double first and then do the cast yourself.)
-	//     - bools map to 0 / 1
-	//     - doubles are cast/truncated when converted to int
-	//       If the double value is converted to uint64 and exceeds the range that
-	//       can be represented exactly in a double, an assert is triggered as this
-	//       is almost always an indication of a problem.  (If you don't need the precision,
-	//       just convert to double and then cast yourself!)
-	// 
-	// Arrays and objects always fail to convert to any destination type.
-	// Return kOK or kWrongType.
-	EResult Convert( std::string &outVal ) const;
-	EResult Convert( bool        &outVal ) const;
-	EResult Convert( double      &outVal ) const;
-	EResult Convert( int         &outVal ) const;
-	EResult Convert( uint64_t    &outVal ) const;
-
-	//
 	// Object access
 	//
 	// This base Value class can do a bunch of things on objects. All functions
@@ -311,7 +330,7 @@ public:
 	// and has range-based for and operator[], for a more idiomatic access.
 	// Note that to iterate the key/value pairs, you can use something like
 	//
-	// for ( auto it: val.AsObjectOrEmpty() ) {}
+	// for ( auto it: val.AsObjectOrEmpty() ) {} // See Object::begin for more info
 	//
 	// NOTE: Many lookup functions below accept the key argument as a
 	// template argument K&&.  This was done primarily to keep the code small.
@@ -346,7 +365,7 @@ public:
 	const Value *ValuePtrAtKey( const char *       key ) const { return const_cast<Value*>(this)->ValuePtrAtKey( key ); }
 
 	// Return reference to the value at the specified key. If this is not an object,
-	// or the key is not found, returns a reference to a statically-allocated null
+	// or the key is not found, returns a reference to a statically-allocated JSON null
 	// value.
 	//
 	// Note that there is no non-const version of this function!
@@ -359,21 +378,32 @@ public:
 
 	// Get the value at the specified key as the specified type. If this is not an object,
 	// or the key is not found, or the item is not the correct JSON type, returns a default
-	template <typename K> const char *  CStringAtKey      ( K&& key, const char *       defaultVal = nullptr ) const { const Value *t = InternalAtKey( key, kString ); return t ? t->_string.c_str() : defaultVal; }
-	template <typename K> std::string   StringAtKey       ( K&& key, const char *       defaultVal = ""      ) const { const Value *t = InternalAtKey( key, kString ); return t ? t->_string : std::string( defaultVal ); } // NOTE: always returns a copy
-	template <typename K> std::string   StringAtKey       ( K&& key, const std::string &defaultVal           ) const { const Value *t = InternalAtKey( key, kString ); return t ? t->_string : defaultVal; } // NOTE: always returns a copy
-	template <typename K> bool          BoolAtKey         ( K&& key, bool               defaultVal = false   ) const { const Value *t = InternalAtKey( key, kBool   ); return t ? t->_bool : defaultVal; } // Requires strict bool type!
-	template <typename K> double        DoubleAtKey       ( K&& key, double             defaultVal = 0.0     ) const { const Value *t = InternalAtKey( key, kDouble ); return t ? t->_double : defaultVal; }
-	template <typename K> int           IntAtKey          ( K&& key, int                defaultVal = 0       ) const { const Value *t = InternalAtKey( key, kDouble ); return t ? (int)t->_double : defaultVal; }
-	template <typename K> const Object *ObjectPtrAtKey    ( K&& key                                          ) const { return (const Object *)InternalAtKey( key, kObject ); }
-	template <typename K> Object *      ObjectPtrAtKey    ( K&& key                                          )       { return (      Object *)InternalAtKey( key, kObject ); }
-	template <typename K> const Array * ArrayPtrAtKey     ( K&& key                                          ) const { return (const Array  *)InternalAtKey( key, kArray  ); }
-	template <typename K> Array *       ArrayPtrAtKey     ( K&& key                                          )       { return (      Array  *)InternalAtKey( key, kArray  ); }
-	template <typename K> const Array  &ArrayAtKeyOrEmpty ( K&& key                                          ) const { const Array  *t = (const Array  *)InternalAtKey( key, kArray  ); return t ? *t : GetStaticEmptyArray(); }
-	template <typename K> const Object &ObjectAtKeyOrEmpty( K&& key                                          ) const { const Object *t = (const Object *)InternalAtKey( key, kObject ); return t ? *t : GetStaticEmptyObject(); }
+	template <typename K> const char *  CStringAtKey      ( K&& key, const char *       defaultVal ) const { const Value *t = InternalAtKey( key, kString ); return t ? t->_string.c_str() : defaultVal; }
+	template <typename K> std::string   StringAtKey       ( K&& key, const char *       defaultVal ) const { const Value *t = InternalAtKey( key, kString ); return t ? t->_string : std::string( defaultVal ); } // NOTE: always returns a copy
+	template <typename K> std::string   StringAtKey       ( K&& key, const std::string &defaultVal ) const { const Value *t = InternalAtKey( key, kString ); return t ? t->_string : defaultVal; } // NOTE: always returns a copy
+	template <typename K> std::string   StringAtKey       ( K&& key, std::string &&     defaultVal ) const { const Value *t = InternalAtKey( key, kString ); return t ? t->_string : std::forward<std::string>( defaultVal ); } // Avoids copy
+	template <typename K> bool          BoolAtKey         ( K&& key, bool               defaultVal ) const { const Value *t = InternalAtKey( key, kBool   ); return t ? t->_bool : defaultVal; } // Requires strict bool type!
+	template <typename K> double        DoubleAtKey       ( K&& key, double             defaultVal ) const { const Value *t = InternalAtKey( key, kDouble ); return t ? t->_double : defaultVal; }
+	template <typename K> int           IntAtKey          ( K&& key, int                defaultVal ) const { const Value *t = InternalAtKey( key, kDouble ); return t ? (int)t->_double : defaultVal; }
+	template <typename K> const Object *ObjectPtrAtKey    ( K&& key                                ) const { return (const Object *)InternalAtKey( key, kObject ); }
+	template <typename K> Object *      ObjectPtrAtKey    ( K&& key                                )       { return (      Object *)InternalAtKey( key, kObject ); }
+	template <typename K> const Array * ArrayPtrAtKey     ( K&& key                                ) const { return (const Array  *)InternalAtKey( key, kArray  ); }
+	template <typename K> Array *       ArrayPtrAtKey     ( K&& key                                )       { return (      Array  *)InternalAtKey( key, kArray  ); }
+	template <typename K> const Array  &ArrayAtKeyOrEmpty ( K&& key                                ) const { const Array  *t = (const Array  *)InternalAtKey( key, kArray  ); return t ? *t : GetStaticEmptyArray(); }
+	template <typename K> const Object &ObjectAtKeyOrEmpty( K&& key                                ) const { const Object *t = (const Object *)InternalAtKey( key, kObject ); return t ? *t : GetStaticEmptyObject(); }
 
 	// Locate the value by key and attempt conversion to the specified type.
-	template <typename K, typename T> EResult ConvertAtKey( K&& key, T &outResult ) const;
+	template <typename K, typename T> EResult TryInterpretAtKey( K&& key, T &outResult ) const;
+
+	// Similar to TryInterpretAtKey(), but returns a default if this is
+	// not an object, the key is not found, or conversion fails
+	template <typename K> std::string InterpretAsStringAtKey( K&& key, const char *       defaultVal ) const { std::string result; if ( TryInterpretAtKey( std::forward<K>(key), result ) != kOK ) return defaultVal; return result; }
+	template <typename K> std::string InterpretAsStringAtKey( K&& key, const std::string &defaultVal ) const { std::string result; if ( TryInterpretAtKey( std::forward<K>(key), result ) != kOK ) return defaultVal; return result; }
+	template <typename K> std::string InterpretAsStringAtKey( K&& key, std::string &&     defaultVal ) const { std::string result( std::forward<std::string>( defaultVal ) ); TryInterpretAtKey( std::forward<K>(key), result ); return result; }
+	template <typename K> bool        InterpretAsBoolAtKey  ( K&& key, bool               defaultVal ) const { TryInterpretAtKey( std::forward<K>(key), defaultVal ); return defaultVal; }
+	template <typename K> double      InterpretAsDoubleAtKey( K&& key, double             defaultVal ) const { TryInterpretAtKey( std::forward<K>(key), defaultVal ); return defaultVal; }
+	template <typename K> int         InterpretAsIntAtKey   ( K&& key, int                defaultVal ) const { TryInterpretAtKey( std::forward<K>(key), defaultVal ); return defaultVal; }
+	template <typename K> uint64      InterpretAsUint64AtKey( K&& key, uint64_t           defaultVal ) const { TryInterpretAtKey( std::forward<K>(key), defaultVal ); return defaultVal; }
 
 	//
 	// Array access
@@ -408,21 +438,32 @@ public:
 
 	// Get the value at the specified index as the specified type. If this is not an array,
 	// or the index is invalid, or the item is the wrong type, returns an appropriate default
-	const char *  CStringAtIndex      ( size_t idx, const char *       defaultVal = nullptr ) const { const Value *t = InternalAtIndex( idx, kString ); return t ? t->_string.c_str() : defaultVal; }
-	std::string   StringAtIndex       ( size_t idx, const char *       defaultVal = ""      ) const { const Value *t = InternalAtIndex( idx, kString ); return t ? t->_string : std::string( defaultVal ); } // NOTE: always returns a copy
-	std::string   StringAtIndex       ( size_t idx, const std::string &defaultVal           ) const { const Value *t = InternalAtIndex( idx, kString ); return t ? t->_string : defaultVal; } // NOTE: always returns a copy
-	bool          BoolAtIndex         ( size_t idx, bool               defaultVal = false   ) const { const Value *t = InternalAtIndex( idx, kBool   ); return t ? t->_bool : defaultVal; } // Requires strict bool type
-	double        DoubleAtIndex       ( size_t idx, double             defaultVal = 0.0     ) const { const Value *t = InternalAtIndex( idx, kDouble ); return t ? t->_bool : defaultVal; }
-	int           IntAtIndex          ( size_t idx, int                defaultVal = 0       ) const { const Value *t = InternalAtIndex( idx, kDouble ); return t ? (int)t->_double : defaultVal; }
-	const Object *ObjectPtrAtIndex    ( size_t idx                                          ) const { return (const Object *)InternalAtIndex( idx, kObject ); }
-	Object *      ObjectPtrAtIndex    ( size_t idx                                          )       { return (      Object *)InternalAtIndex( idx, kObject ); }
-	const Array * ArrayPtrAtIndex     ( size_t idx                                          ) const { return (const Array  *)InternalAtIndex( idx, kArray  ); }
-	Array *       ArrayPtrAtIndex     ( size_t idx                                          )       { return (      Array  *)InternalAtIndex( idx, kArray  ); }
-	const Array  &ArrayAtIndexOrEmpty ( size_t idx                                          ) const { const Array  *t = (const Array  *)InternalAtIndex( idx, kArray  ); return t ? *t : GetStaticEmptyArray(); }
-	const Object &ObjectAtIndexOrEmpty( size_t idx                                          ) const { const Object *t = (const Object *)InternalAtIndex( idx, kObject ); return t ? *t : GetStaticEmptyObject(); }
+	const char *  CStringAtIndex      ( size_t idx, const char *       defaultVal ) const { const Value *t = InternalAtIndex( idx, kString ); return t ? t->_string.c_str() : defaultVal; }
+	std::string   StringAtIndex       ( size_t idx, const char *       defaultVal ) const { const Value *t = InternalAtIndex( idx, kString ); return t ? t->_string : std::string( defaultVal ); } // NOTE: always returns a copy
+	std::string   StringAtIndex       ( size_t idx, const std::string &defaultVal ) const { const Value *t = InternalAtIndex( idx, kString ); return t ? t->_string : defaultVal; } // NOTE: always returns a copy
+	std::string   StringAtIndex       ( size_t idx, std::string &&     defaultVal ) const { const Value *t = InternalAtIndex( idx, kString ); return t ? t->_string : std::forward<std::string>( defaultVal ); } // Avoids the copy
+	bool          BoolAtIndex         ( size_t idx, bool               defaultVal ) const { const Value *t = InternalAtIndex( idx, kBool   ); return t ? t->_bool : defaultVal; } // Requires strict bool type
+	double        DoubleAtIndex       ( size_t idx, double             defaultVal ) const { const Value *t = InternalAtIndex( idx, kDouble ); return t ? t->_bool : defaultVal; }
+	int           IntAtIndex          ( size_t idx, int                defaultVal ) const { const Value *t = InternalAtIndex( idx, kDouble ); return t ? (int)t->_double : defaultVal; }
+	const Object *ObjectPtrAtIndex    ( size_t idx                                ) const { return (const Object *)InternalAtIndex( idx, kObject ); }
+	Object *      ObjectPtrAtIndex    ( size_t idx                                )       { return (      Object *)InternalAtIndex( idx, kObject ); }
+	const Array * ArrayPtrAtIndex     ( size_t idx                                ) const { return (const Array  *)InternalAtIndex( idx, kArray  ); }
+	Array *       ArrayPtrAtIndex     ( size_t idx                                )       { return (      Array  *)InternalAtIndex( idx, kArray  ); }
+	const Array  &ArrayAtIndexOrEmpty ( size_t idx                                ) const { const Array  *t = (const Array  *)InternalAtIndex( idx, kArray  ); return t ? *t : GetStaticEmptyArray(); }
+	const Object &ObjectAtIndexOrEmpty( size_t idx                                ) const { const Object *t = (const Object *)InternalAtIndex( idx, kObject ); return t ? *t : GetStaticEmptyObject(); }
 
 	// Locate the value by index and attempt conversion to the specified type.
-	template <typename T> EResult ConvertAtIndex( size_t idx, T &outResult ) const;
+	template <typename T> EResult TryInterpretAtIndex( size_t idx, T &outResult ) const;
+
+	// Similar to TryInterpretAtIndex(), but returns a default if this is
+	// not an array, the index is invalid, or conversion fails
+	std::string InterpretAsStringAtIndex( size_t idx, const char *       defaultVal ) const { std::string result; if ( TryInterpretAtIndex( idx, result ) != kOK ) result = defaultVal; return result; }
+	std::string InterpretAsStringAtIndex( size_t idx, const std::string &defaultVal ) const { std::string result; if ( TryInterpretAtIndex( idx, result ) != kOK ) result = defaultVal; return result; }
+	std::string InterpretAsStringAtIndex( size_t idx, std::string &&     defaultVal ) const { std::string result( std::forward<std::string>( defaultVal ) ); TryInterpretAtIndex( idx, result ); return result; }
+	bool        InterpretAsBoolAtIndex  ( size_t idx, bool               defaultVal ) const { TryInterpretAtIndex( idx, defaultVal ); return defaultVal; }
+	double      InterpretAsDoubleAtIndex( size_t idx, double             defaultVal ) const { TryInterpretAtIndex( idx, defaultVal ); return defaultVal; }
+	int         InterpretAsIntAtIndex   ( size_t idx, int                defaultVal ) const { TryInterpretAtIndex( idx, defaultVal ); return defaultVal; }
+	uint64      InterpretAsUint64AtIndex( size_t idx, uint64_t           defaultVal ) const { TryInterpretAtIndex( idx, defaultVal ); return defaultVal; }
 
 	//
 	// Parsing/print JSON text
@@ -437,8 +478,7 @@ public:
 	bool ParseJSON( const char *begin, const char *end, ParseContext *ctx = nullptr );
 
 	// Print the value to JSON text.
-	std::string PrintJSON( const PrintOptions &opt = PrintOptions{} );
-
+	std::string PrintJSON( const PrintOptions &opt = PrintOptions{} ) const;
 
 	// @VALVE Memory validation
 	#ifdef DBGFLAG_VALIDATE
@@ -544,6 +584,10 @@ public:
 	Array( Array &&x ) : Value( std::forward<Array>(x) ) {}
 	Array( const RawArray &x ) : Value( x ) {}
 	Array( RawArray && x ) : Value( std::forward<RawArray>( x ) ) {}
+	Array &operator=( const Array & x ) { VJSON_ASSERT( x._type == kArray ); Value::operator=(x); return *this; }
+	Array &operator=( Array && x ) { VJSON_ASSERT( x._type == kArray ); Value::operator=(std::forward<Array>(x)); return *this; }
+	Array &operator=( const RawArray & x ) { Value::operator=(x); return *this; }
+	Array &operator=( RawArray && x ) { Value::operator=(std::forward<Array>(x)); return *this; }
 
 	// Construct Array from initializer list.
 	// E.g. Value( { "one", 5.0, false } )
@@ -576,7 +620,7 @@ public:
 	const RawArray &Raw() const { VJSON_ASSERT( _type == kArray ); return _array; }
 	RawArray       &Raw()       { VJSON_ASSERT( _type == kArray ); return _array; }
 
-	// Iterate all elements. Example:
+	// Iterate all the values int he array (range-based for).  Example:
 	//
 	// Array arr;
 	// for ( Value &val: arr ) {}
@@ -585,8 +629,9 @@ public:
 	const Value *begin() const { VJSON_ASSERT( _type == kArray ); return _array.data(); }
 	const Value *end()   const { VJSON_ASSERT( _type == kArray ); return _array.data() + _array.size(); }
 
-	// Iterate only the specified types. (Skip elements of other types.)
-	// Any T for which you can do Value::As<T> will work.
+	// Iterate only the elements of the arrayu that are of the specified
+	// type. (Elements Values of other types.)  Any T for which you can
+	// do Value::Is<T> and Get<T> will work.
 	//
 	// Examples:
 	//
@@ -605,27 +650,27 @@ public:
 //
 /////////////////////////////////////////////////////////////////////////////
 
-template<> inline bool Value::Is<nullptr_t >() const { return _type == kNull; }
-template<> inline bool Value::Is<Object >() const { return _type == kObject; }
-template<> inline bool Value::Is<Array >() const { return _type == kArray; }
+template<> inline bool Value::Is<std::nullptr_t>() const { return _type == kNull; }
+template<> inline bool Value::Is<Object>() const { return _type == kObject; }
+template<> inline bool Value::Is<Array>() const { return _type == kArray; }
 template<> inline bool Value::Is<const char *>() const { return _type == kString; }
-template<> inline bool Value::Is<std::string >() const { return _type == kString; }
-template<> inline bool Value::Is<double >() const { return _type == kDouble; }
-template<> inline bool Value::Is<bool >() const { return _type == kBool; }
-template<> inline const char * Value::As<const char *>() const { VJSON_ASSERT( _type == kString ); return _string.c_str(); }
-template<> inline const char * Value::As<const char *>() { VJSON_ASSERT( _type == kString ); return _string.c_str(); }
-template<> inline const std::string &Value::As<std::string >() const { VJSON_ASSERT( _type == kString ); return _string; }
-template<> inline std::string & Value::As<std::string >() { VJSON_ASSERT( _type == kString ); return _string; }
-template<> inline const bool & Value::As<bool >() const { VJSON_ASSERT( _type == kBool ); return _bool; } // NOTE: requires exact bool type!
-template<> inline bool & Value::As<bool >() { VJSON_ASSERT( _type == kBool ); return _bool; } // NOTE: requires exact bool type!
-template<> inline const double & Value::As<double >() const { VJSON_ASSERT( _type == kDouble ); return _double; }
-template<> inline double & Value::As<double >() { VJSON_ASSERT( _type == kDouble ); return _double; }
-template<> inline int Value::As<int >() const { VJSON_ASSERT( _type == kDouble ); return (int)_double; }
-template<> inline int Value::As<int >() { VJSON_ASSERT( _type == kDouble ); return (int)_double; }
-template<> inline const Object & Value::As<Object >() const { VJSON_ASSERT( _type == kObject ); return *(const Object*)this; }
-template<> inline Object & Value::As<Object >() { VJSON_ASSERT( _type == kObject ); return *(Object*)this; }
-template<> inline const Array & Value::As<Array >() const { VJSON_ASSERT( _type == kArray ); return *(const Array*)(this); }
-template<> inline Array & Value::As<Array >() { VJSON_ASSERT( _type == kArray ); return *(Array*)this; }
+template<> inline bool Value::Is<std::string>() const { return _type == kString; }
+template<> inline bool Value::Is<double>() const { return _type == kDouble; }
+template<> inline bool Value::Is<bool>() const { return _type == kBool; }
+template<> inline const char * Value::Get<const char *>() const { VJSON_ASSERT( _type == kString ); return _string.c_str(); }
+template<> inline const char * Value::Get<const char *>() { VJSON_ASSERT( _type == kString ); return _string.c_str(); }
+template<> inline const std::string &Value::Get<std::string>() const { VJSON_ASSERT( _type == kString ); return _string; }
+template<> inline std::string & Value::Get<std::string>() { VJSON_ASSERT( _type == kString ); return _string; }
+template<> inline const bool & Value::Get<bool>() const { VJSON_ASSERT( _type == kBool ); return _bool; } // NOTE: requires exact bool type!
+template<> inline bool & Value::Get<bool>() { VJSON_ASSERT( _type == kBool ); return _bool; } // NOTE: requires exact bool type!
+template<> inline const double & Value::Get<double>() const { VJSON_ASSERT( _type == kDouble ); return _double; }
+template<> inline double & Value::Get<double>() { VJSON_ASSERT( _type == kDouble ); return _double; }
+template<> inline int Value::Get<int>() const { VJSON_ASSERT( _type == kDouble ); return (int)_double; }
+template<> inline int Value::Get<int>() { VJSON_ASSERT( _type == kDouble ); return (int)_double; }
+template<> inline const Object & Value::Get<Object>() const { VJSON_ASSERT( _type == kObject ); return *(const Object*)this; }
+template<> inline Object & Value::Get<Object>() { VJSON_ASSERT( _type == kObject ); return *(Object*)this; }
+template<> inline const Array & Value::Get<Array>() const { VJSON_ASSERT( _type == kArray ); return *(const Array*)(this); }
+template<> inline Array & Value::Get<Array>() { VJSON_ASSERT( _type == kArray ); return *(Array*)this; }
 
 template <typename T, typename K>
 inline EResult Value::SetAtKey( K&& key, T&& value )
@@ -644,20 +689,20 @@ EResult Value::EraseAtKey( K&& key )
 }
 
 template <typename K, typename T>
-EResult Value::ConvertAtKey( K&& key, T &outResult ) const
+EResult Value::TryInterpretAtKey( K&& key, T &outResult ) const
 {
 	if ( _type != kObject ) return kNotObject;
 	auto it = _object.find( key );
 	if ( it == _object.end() ) return kBadKey;
-	return it->second.Convert( outResult );
+	return it->second.TryInterpret( outResult );
 }
 
 template <typename T>
-EResult Value::ConvertAtIndex( size_t idx, T &outResult ) const
+EResult Value::TryInterpretAtIndex( size_t idx, T &outResult ) const
 {
 	if ( _type != kArray ) return kNotArray;
 	if ( idx >= _array.size() ) return kBadIndex;
-	return _array[ idx ].Convert( outResult );
+	return _array[ idx ].TryInterpret( outResult );
 }
 
 template <typename T>
@@ -671,37 +716,40 @@ void Value::SetArray( const T *begin, const T *end )
 
 template<typename T, typename V, typename A, typename R>
 struct ArrayIter {
-	V v; A arr;
-	ArrayIter( V b, A a ) : v(b), arr(a) { this->Next(); } 
-	R operator*() const { return this->v->template As<T>(); }
+	A &array_ref;
+	V *cur_ptr;
+	R operator*() const { return this->cur_ptr->template Get<T>(); }
 	void operator++() {
-		VJSON_ASSERT( this->v <= this->end() ); // incremented, but already at the end. Or, array was modified during iteration
-		++this->v; this->Next();
+		VJSON_ASSERT( this->cur_ptr < this->end() ); // going past the end, or array was modified during iteration
+		++this->cur_ptr; this->Next();
 	}
 
 	template<typename XV, typename XA, typename XR>
 	bool operator!=(const ArrayIter<T,XV,XA,XR> &x ) const {
-		VJSON_ASSERT( &this->arr == &x.arr ); // Should only compare two iterators created from the same array
-		VJSON_ASSERT( this->v <= this->end() && x.v <= this->end() ); // Should not delete from array during iteration
-		return this->v != x.v;
+		VJSON_ASSERT( &this->array_ref == &x.array_ref ); // Should only compare two iterators created from the same array
+		VJSON_ASSERT( this->cur_ptr <= this->end() && x.cur_ptr <= this->end() ); // Should not delete from array during iteration
+		return this->cur_ptr != x.cur_ptr;
 	}
 	void Next() {
 		auto e = this->end();
-		while ( this->v < e && this->v->Type() != TypeTraits<T>::kType )
-			++this->v; 
+		while ( this->cur_ptr < e && this->cur_ptr->Type() != TypeTraits<T>::kType )
+			++this->cur_ptr; 
 	}
-	V end() const { return this->arr.data() + this->arr.size(); }
+	V *end() const { return this->array_ref.data() + this->array_ref.size(); }
 };
-template<typename T, typename V, typename A, typename I> struct ArrayRange
+template<typename T, typename A, typename I> struct ArrayRange
 {
-	A arr;
-	I begin() const { return I{arr.data(), arr}; }
-	I end() const { return I{arr.data()+arr.size(), arr}; }
+	A &array_ref;
+	I begin() const { I beg{array_ref,array_ref.data()}; beg.Next(); return beg; }
+	I end() const { return I{array_ref,array_ref.data()+array_ref.size()}; }
 };
 
 template <typename T> ConstArrayRange<T> Array::Iter() const { return ConstArrayRange<T>{this->_array}; }
 template <typename T> MutableArrayRange<T> Array::Iter() { return MutableArrayRange<T>{this->_array}; }
 
 } // namespace vjson
+
+// @VALVE
+#include <tier0/memdbgon.h>
 
 #endif // _H

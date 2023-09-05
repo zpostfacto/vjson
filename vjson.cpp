@@ -6,14 +6,19 @@
 //
 // See LICENSE for more information.
 //
-// If you are reading the soruce code to understand how to use vjson, then I
+// If you are reading the source code to understand how to use vjson, then I
 // have utterly failed and you should provide feedback on what was unclear.
 // The intention is that to *use* vjson, you only need to read the header.
 //
 /////////////////////////////////////////////////////////////////////////////
 
+// !KLUDGE! If you disable exception handling, you will get a warning simply
+//          by including locale.h on some versions of Visual Studio
+#ifdef _MSC_VER
+	#pragma warning (disable: 4530) // C++ exception handler used, but unwind semantics are not enabled. Specify /EHsc
+#endif
+
 #include <stdarg.h>
-#include <inttypes.h>
 #include <locale.h>
 
 #include "vjson.h"
@@ -25,7 +30,7 @@ namespace vjson {
 
 // It really seems like C++ ought to make this easier, right?
 template <typename T> void InvokeDestructor( T &x ) { x.~T(); }
-template <typename T, typename A> void InvokeConstructor( T &x, A&& a ) { new (&x) T{ std::forward<A>( a ) }; }
+template <typename T, typename A> void InvokeConstructor( T &x, A&& a ) { new (&x) T( std::forward<A>( a ) ); }
 template <typename T> void InvokeConstructor( T &x) { new (&x) T{}; }
 
 const Object &GetStaticEmptyObject()
@@ -336,7 +341,7 @@ void Value::SetEmptyArray()
 	}
 }
 
-EResult Value::Convert( std::string &outX ) const
+EResult Value::TryInterpret( std::string &outX ) const
 {
 	switch ( _type )
 	{
@@ -376,7 +381,7 @@ EResult Value::Convert( std::string &outX ) const
 	return kWrongType;
 }
 
-EResult Value::Convert( bool &outX ) const
+EResult Value::TryInterpret( bool &outX ) const
 {
 	switch ( _type )
 	{
@@ -457,7 +462,7 @@ EResult Value::Convert( bool &outX ) const
 	return kWrongType;
 }
 
-EResult Value::Convert( double &outX ) const
+EResult Value::TryInterpret( double &outX ) const
 {
 	switch ( _type )
 	{
@@ -493,7 +498,7 @@ EResult Value::Convert( double &outX ) const
 	return kWrongType;
 }
 
-EResult Value::Convert( int &outX ) const
+EResult Value::TryInterpret( int &outX ) const
 {
 	switch ( _type )
 	{
@@ -530,7 +535,7 @@ EResult Value::Convert( int &outX ) const
 	return kWrongType;
 }
 
-EResult Value::Convert( uint64_t &outX ) const
+EResult Value::TryInterpret( uint64_t &outX ) const
 {
 	switch ( _type )
 	{
@@ -548,12 +553,12 @@ EResult Value::Convert( uint64_t &outX ) const
 
 		case kString:
 		{
-			uint64_t val;
+			unsigned long long val;
 			int n = -1;
-			sscanf( _string.c_str(), "%" PRIu64 "%n %n", &val, &n, &n );
+			sscanf( _string.c_str(), "%llu%n %n", &val, &n, &n );
 			if ( n >= 0 && _string[n] == '\0' )
 			{
-				outX = val;
+				outX = (uint64_t)val;
 				return kOK;
 			}
 			break;
@@ -811,13 +816,13 @@ struct Printer
 				break;
 
 			case kString:
-				AppendQuotedString( v.AsString().c_str() );
+				AppendQuotedString( v.GetString().c_str() );
 				break;
 
 			case kDouble:
 			{
 				char temp[ 64 ];
-				size_t l = snprintf( temp, sizeof(temp), "%g", v.AsDouble() );
+				size_t l = snprintf( temp, sizeof(temp), "%g", v.GetDouble() );
 				char *comma = strchr( temp, ',' ); // Check if locale is using comma as digit separator
 				if ( comma )
 					*comma = '.';
@@ -826,24 +831,24 @@ struct Printer
 			}
 
 			case kBool:
-				if ( v.AsBool() )
+				if ( v.GetBool() )
 					Append( "true", 4 );
 				else
 					Append( "false", 5 );
 				break;
 
 			case kObject:
-				PrintObject( v.AsObject().Raw() );
+				PrintObject( v.GetObject().Raw() );
 				break;
 
 			case kArray:
-				PrintArray( v.AsArray().Raw() );
+				PrintArray( v.GetArray().Raw() );
 				break;
 		}
 	}
 };
 
-std::string Value::PrintJSON( const PrintOptions &opt )
+std::string Value::PrintJSON( const PrintOptions &opt ) const
 {
 	Printer p( opt );
 	p.PrintValue( *this );
@@ -1112,7 +1117,7 @@ unterminated_string:
 
 					default:
 						ptr = s;
-						if ( *s > 0x20 && *s < 128 )
+						if ( *s > 0x20 && (unsigned char)*s < 128 )
 							Errorf( "Invalid escape sequence '\\%c' in string", *s );
 						else
 							Errorf( "Character 0x%2x is not valid after '\\' in string", *s );
@@ -1262,7 +1267,7 @@ unterminated_string:
 		}
 
 		// OK, parse items into the object
-		RawObject &rawObj = out.AsObject().Raw();
+		RawObject &rawObj = out.GetObject().Raw();
 
 		for (;;)
 		{
@@ -1350,7 +1355,7 @@ unterminated_string:
 		}
 
 		// OK, parse items into the array
-		RawArray &rawArray = out.AsArray().Raw();
+		RawArray &rawArray = out.GetArray().Raw();
 
 		for (;;)
 		{
@@ -1491,7 +1496,7 @@ unterminated_string:
 		}
 
 		// Exponent?
-		if ( ptr < end && *ptr == 'e' || *ptr == 'E' )
+		if ( ptr < end && ( *ptr == 'e' || *ptr == 'E' ) )
 		{
 			STORE_CHARACTER( *ptr );
 			++ptr;
@@ -1631,6 +1636,11 @@ unterminated_string:
 bool Value::ParseJSON( const char *begin, const char *end, ParseContext *ctx )
 {
 	VJSON_ASSERT( begin <= end );
+
+	// Trim off any trailing '\0's from the end
+	while ( end > begin && end[-1] == '\0' )
+		--end;
+
 	ParseContext dummy_ctx;
 	Parser p( ctx ? *ctx : dummy_ctx, begin, end );
 	if ( !p.ParseRequiredValue( *this ) )
@@ -1645,7 +1655,7 @@ bool Value::ParseJSON( const char *begin, const char *end, ParseContext *ctx )
 	if ( c < 0 )
 		return true;
 
-	p.Errorf( "Extra text starting with character '%c' (0x%02x)", c, c );
+	p.Errorf( "Extra text starting with character 0x%02x='%c'", c, c );
 	SetNull();
 	return false;
 }
