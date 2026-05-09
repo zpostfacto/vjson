@@ -2,45 +2,46 @@
 
 [![CI](https://github.com/zpostfacto/vjson/actions/workflows/ci.yml/badge.svg)](https://github.com/zpostfacto/vjson/actions/workflows/ci.yml)
 
-vjson is a lightweight but friendly-to-use JSON parser and DOM in C++.
+`vjson` is a small C++ JSON parser and DOM focusing on good ergonomics.
 
 Design goals:
 
-- Good ergonomics when traversing the DOM (see below).  This is the most
+- **Good ergonomics** when traversing the DOM (see below).  This is the most
   unique goal among the many other libraries available.
-- Small: one ~750-line header, one ~1700-line .cpp file
-- No external dependencies.  (No, not even boost.)
-- Use STL containers for storage: ``std::vector`` for arrays;
-  ``std::map`` for objects.
-- Strings and keys stored as ``std::string``, but access using
-  ``const char *`` is possible in most places.
-- No use of exceptions, RTTI, ``iostream``, etc.  Safe to use in
+- **Small**: one ~750-line header, one ~1700-line .cpp file
+- **No external dependencies**.  No boost, no custom containers or
+  allocators.  Use STL containers for storage: ``std::vector`` for arrays;
+  ``std::map`` for objects.  Strings and keys stored as ``std::string``,
+  but access using ``const char *`` is possible in most places.
+- **No exceptions/RTTI**.  Also, no ``iostream``.  Safe to use in
   codebases that disable exceptions entirely.
-- DOM-style interface: read the whole document into some data
+- **DOM-style interface**: read the whole document into some data
   structures at once.  (No SAX-style / streaming interface.)
-- Parser only accepts the document as memory block, so entire source must
-  fit in memory.  (No ``istream``, ``FILE*``, iterator interface, etc)
-- Printing options: Some basic options for minified or indented.
+- **Printing options**: Some basic options for minified or indented.
   (No framework for detailed customization.)
-- If parsing fails, provide a good error message with a line number
+- **Good error messages** if parsing fails, with a line number
   (important for "pretty" / hand-edited JSON) and byte offset (important
   for "minified" JSON).
-- Parsing options: Comments and trailing commas can be optionally ignored.
+- **Parsing options**: Comments and trailing commas can be optionally ignored.
 
 Here are some goals this library doesn't have.  (If you need these, try
 one of the other libraries below.)
 
-- Remember formatting or comments, to support automated modification of
-  documents
-- Super-fast or efficient.  This lib aims to not be *grossly* inefficient,
+- **Not ultra-fast or efficient**.  This lib aims to not be *grossly* inefficient,
   but it also avoids weird/complicated stuff in the name of efficiency.
   See some of the libs below if you need fast parsing or to load in huge
   documents.
-- Header-only library.  I consider putting all the guts of the parsing code
-  in a header an anti-pattern.
+- **Not a header-only library**.  Putting all the parsing implementation guts
+  in a header that must be parsed and compiled by every source file that wants
+  to load up a JSON document is an anti-pattern.  This adds to build
+  time and bloats executables with no benefit to performance.
 - Super streamlined syntax for constructing a DOM in C++ code
+- No ``istream``, ``FILE*``, iterator interface, etc.  The whole file must
+  fit in memory.
+- Remember formatting or comments, to support automated modification of
+  documents
 
-# Really?  Another JSON parser?
+# Every field access should not require an `if ()` statement
 
 My biggest complaint with other JSON libs is how tedious it can be
 to write code to load up a file.  Specifically:
@@ -74,9 +75,72 @@ That's when vjson shines.  For example:
   just fail if the input is some other JSON value, and don't make me write
   an explicit check for that case.
 
-TL;DR: Error handling should not constitute the majority of the code to
-load up a document, when your goal is simply "do something reasonable and
-don't crash."
+For example:
+
+```json
+{
+    "ranked": 1,
+    "server": "Seattle #4",
+    "match_id": "14889406635632900096",
+    "players": [
+        { "name": "Alice", "score": 1500 },
+        42,
+        { "name": "Bob",   "score": 1200 },
+        { "name": "Carl" }
+    ],
+    "top_scores": []
+}
+```
+
+here is how we could extra data from this this file using vjson:
+
+```cpp
+vjson::Object doc;
+vjson::ParseContext ctx;
+if ( !doc.ParseJSON( file_contents, &ctx ) )
+{
+    fprintf( stderr, "Parse failed line %d: %s\n",
+        ctx.error_line, ctx.error_message.c_str() );
+    return false;
+}
+
+// "ranked" is integer 1, not bool.
+// InterpretAsBoolAtKey() converts 0/1 to false/true.
+bool ranked = doc.InterpretAsBoolAtKey( "ranked", false );
+// ranked == true
+
+// "timeout_ms" key is absent.
+// DoubleAtKey() returns the supplied default without complaint.
+double timeout = doc.DoubleAtKey( "timeout_ms", 5000.0 );
+// timeout == 5000.0
+
+// 64-bit IDs must be stored as strings in JSON -- a JSON "number" is a
+// double, which only has 53 bits of mantissa and will silently corrupt a
+// 64-bit value.  InterpretAsUint64AtKey() reads a string and parses it,
+// so the full precision is preserved.
+uint64_t match_id = doc.InterpretAsUint64AtKey( "match_id", 0 );
+// match_id == 14889406635632900096ull
+
+// "spectators" key is absent entirely.
+// ArrayAtKeyOrEmpty() returns a static empty array reference;
+// Iter<Object>() produces zero iterations.  Loop body never executes.
+for ( const vjson::Object &p : doc.ArrayAtKeyOrEmpty( "spectators" ).Iter<vjson::Object>() )
+    printf( "spectator: %s\n", p.StringAtKey( "name", "?" ).c_str() );
+
+// "players" has a stray integer 42 mixed in with the objects.
+// Iter<Object>() silently skips any element that isn't an object.
+for ( const vjson::Object &p : doc.ArrayAtKeyOrEmpty( "players" ).Iter<vjson::Object>() )
+    printf( "%s: %.0f\n", p.StringAtKey( "name", "?" ).c_str(), p.DoubleAtKey( "score", 0.0 ) );
+// Prints "Alice: 1500", "Bob: 1200", and "Carl: 0"
+// - The stray 42 is silently skipped.
+// - Carl's score is missing so the default is used
+
+// "top_scores" is present but empty.  We want the name of the top scorer.
+// AtIndex(0) on an empty (or absent) array returns a static null Value;
+// CStringAtKey() on a null Value returns the default.  No crash, no if-statement.
+const char *leader = doc["top_scores"].AtIndex(0).CStringAtKey( "name", "(nobody)" );
+// leader == "(nobody)"
+```
 
 # Building
 

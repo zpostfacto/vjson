@@ -759,6 +759,56 @@ TEST(ParseErrors, MinifiedVsPretty) {
 	CheckParseError( "{\n  \"a\": 1\n  \"b\": 2\n}", 3, 13, "Expected '}' or ','" );
 }
 
+// Verify all the API calls in the README "quick example" section compile and
+// produce the documented results.
+TEST(Misc, ReadmeExample) {
+	const char *response = R"({
+		"ranked": 1,
+		"server": "Seattle #4",
+		"match_id": "14889406635632900096",
+		"players": [
+			{ "name": "Alice", "score": 1500 },
+			42,
+			{ "name": "Bob",   "score": 1200 },
+			{ "name": "Carl" }
+		],
+		"top_scores": []
+	})";
+
+	vjson::Object doc;
+	vjson::ParseContext ctx;
+	ASSERT_TRUE( doc.ParseJSON( response, &ctx ) ) << ctx.error_message;
+
+	bool ranked = doc.InterpretAsBoolAtKey( "ranked", false );
+	EXPECT_TRUE( ranked );
+
+	double timeout = doc.DoubleAtKey( "timeout_ms", 5000.0 );
+	EXPECT_EQ( timeout, 5000.0 );
+
+	int spectator_count = 0;
+	for ( const vjson::Object &p : doc.ArrayAtKeyOrEmpty( "spectators" ).Iter<vjson::Object>() )
+		(void)p, ++spectator_count;
+	EXPECT_EQ( spectator_count, 0 );
+
+	std::vector<std::string> names;
+	std::vector<double> scores;
+	for ( const vjson::Object &p : doc.ArrayAtKeyOrEmpty( "players" ).Iter<vjson::Object>() )
+	{
+		names.push_back( p.StringAtKey( "name", "?" ) );
+		scores.push_back( p.DoubleAtKey( "score", 0.0 ) );
+	}
+	ASSERT_EQ( names.size(), 3u );
+	EXPECT_EQ( names[0], "Alice" );  EXPECT_EQ( scores[0], 1500.0 );
+	EXPECT_EQ( names[1], "Bob" );    EXPECT_EQ( scores[1], 1200.0 );
+	EXPECT_EQ( names[2], "Carl" );   EXPECT_EQ( scores[2], 0.0 );    // missing → default
+
+	const char *leader = doc["top_scores"].AtIndex(0).CStringAtKey( "name", "(nobody)" );
+	EXPECT_STREQ( leader, "(nobody)" );
+
+	uint64_t match_id = doc.InterpretAsUint64AtKey( "match_id", 0 );
+	EXPECT_EQ( match_id, 14889406635632900096ull );
+}
+
 int main(int argc, char **argv) {
 	::testing::InitGoogleTest( &argc, argv );
 	return RUN_ALL_TESTS();
