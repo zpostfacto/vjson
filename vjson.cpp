@@ -1081,21 +1081,22 @@ unterminated_string:
 							return false;
 
 						// 4 hex digits can only encode unicode codepoints up to 0xffff.
-						// So that's either 1 or two bytes output.
+						// So that's either 1, 2, or 3 bytes of UTF-8 output.
+						// The input is always 6 bytes: \uXXXX
 						if ( x <= 0x7f )
 						{
-							// 5 bytes input, 1 byte output.
-							escape_overhead += 4;
+							// 6 bytes input, 1 byte output.
+							escape_overhead += 5;
 						}
 						else if ( x <= 0x7ff )
 						{
-							// 5 bytes input, 2 bytes output.
-							escape_overhead += 3;
+							// 6 bytes input, 2 bytes output.
+							escape_overhead += 4;
 						}
 						else
 						{
-							// 5 bytes input, 3 bytes output.
-							escape_overhead += 2;
+							// 6 bytes input, 3 bytes output.
+							escape_overhead += 3;
 						}
 						s += 4;
 					} break;
