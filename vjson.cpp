@@ -483,6 +483,9 @@ EResult Value::TryInterpret( double &outX ) const
 		}
 
 		case kNull:
+			outX = 0.0;
+			return kOK;
+
 		case kObject:
 		case kArray:
 		case kBool:
