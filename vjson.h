@@ -264,7 +264,7 @@ public:
 	bool        InterpretAsBool  ( bool               defaultVal ) const { TryInterpret( defaultVal ); return defaultVal; }
 	double      InterpretAsDouble( double             defaultVal ) const { TryInterpret( defaultVal ); return defaultVal; }
 	int         InterpretAsInt   ( int                defaultVal ) const { TryInterpret( defaultVal ); return defaultVal; }
-	uint64      InterpretAsUint64( uint64_t           defaultVal ) const { TryInterpret( defaultVal ); return defaultVal; }
+	uint64_t    InterpretAsUint64( uint64_t           defaultVal ) const { TryInterpret( defaultVal ); return defaultVal; }
 
 	// Perform a blind "static cast" of the value to the specified type. The value must
 	// be the exact type; no conversions or type checks are attempted; these will assert
@@ -395,7 +395,7 @@ public:
 	template <typename K> bool        InterpretAsBoolAtKey  ( K&& key, bool               defaultVal ) const { TryInterpretAtKey( std::forward<K>(key), defaultVal ); return defaultVal; }
 	template <typename K> double      InterpretAsDoubleAtKey( K&& key, double             defaultVal ) const { TryInterpretAtKey( std::forward<K>(key), defaultVal ); return defaultVal; }
 	template <typename K> int         InterpretAsIntAtKey   ( K&& key, int                defaultVal ) const { TryInterpretAtKey( std::forward<K>(key), defaultVal ); return defaultVal; }
-	template <typename K> uint64      InterpretAsUint64AtKey( K&& key, uint64_t           defaultVal ) const { TryInterpretAtKey( std::forward<K>(key), defaultVal ); return defaultVal; }
+	template <typename K> uint64_t    InterpretAsUint64AtKey( K&& key, uint64_t           defaultVal ) const { TryInterpretAtKey( std::forward<K>(key), defaultVal ); return defaultVal; }
 
 	//
 	// Array access
@@ -455,7 +455,7 @@ public:
 	bool        InterpretAsBoolAtIndex  ( size_t idx, bool               defaultVal ) const { TryInterpretAtIndex( idx, defaultVal ); return defaultVal; }
 	double      InterpretAsDoubleAtIndex( size_t idx, double             defaultVal ) const { TryInterpretAtIndex( idx, defaultVal ); return defaultVal; }
 	int         InterpretAsIntAtIndex   ( size_t idx, int                defaultVal ) const { TryInterpretAtIndex( idx, defaultVal ); return defaultVal; }
-	uint64      InterpretAsUint64AtIndex( size_t idx, uint64_t           defaultVal ) const { TryInterpretAtIndex( idx, defaultVal ); return defaultVal; }
+	uint64_t    InterpretAsUint64AtIndex( size_t idx, uint64_t           defaultVal ) const { TryInterpretAtIndex( idx, defaultVal ); return defaultVal; }
 
 	//
 	// Parsing/print JSON text
