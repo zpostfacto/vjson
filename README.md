@@ -1,5 +1,7 @@
 # vjson
 
+[![CI](https://github.com/zpostfacto/vjson/actions/workflows/ci.yml/badge.svg)](https://github.com/zpostfacto/vjson/actions/workflows/ci.yml)
+
 vjson is a lightweight but friendly-to-use JSON parser and DOM in C++.
 
 Design goals:
