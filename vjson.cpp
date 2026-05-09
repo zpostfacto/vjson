@@ -23,8 +23,7 @@
 
 #include "vjson.h"
 
-// @VALVE
-#undef new
+
 
 namespace vjson {
 
@@ -1694,34 +1693,5 @@ bool Object::ParseJSON( const char *begin, const char *end, ParseContext *ctx )
 //	SetEmptyArray(); // Type safety in case caller reuses
 //	return false;
 //}
-
-// @VALVE>> Memory validation
-#ifdef DBGFLAG_VALIDATE
-void Value::Validate( CValidator &validator, const char *pchName ) const
-{
-	switch (_type)
-	{
-		default:
-			Assert( false );
-		case kNull:
-		case kBool:
-		case kDouble:
-			break;
-
-		case kObject:
-			ValidateRecursive( _object );
-			break;
-
-		case kArray:
-			ValidateRecursive( _array );
-			break;
-
-		case kString:
-			ValidateRecursive( _string );
-			break;
-	}
-}
-#endif
-// @VALVE<<
 
 } // namespace vjson

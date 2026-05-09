@@ -17,14 +17,6 @@
 #include <vector>
 #include <map>
 
-// @VALVE Memory validation, etc
-#include <tier0/dbg.h>
-#ifdef DBGFLAG_VALIDATE
-	#include <tier0/validator.h>
-#endif
-#include <tier0/memdbgoff.h>
-#define VJSON_ASSERT Assert
-
 // #define VJSON_ASSERT to something else if you want to customize
 // assertion behaviour. Assertions during parsing are only for bugs, not for
 // malformed input. Some functions may assert if used incorrectly, and so
@@ -480,10 +472,7 @@ public:
 	// Print the value to JSON text.
 	std::string PrintJSON( const PrintOptions &opt = PrintOptions{} ) const;
 
-	// @VALVE Memory validation
-	#ifdef DBGFLAG_VALIDATE
-		void Validate( CValidator &validator, const char *pchName ) const;
-	#endif
+
 
 protected:
 
@@ -748,8 +737,5 @@ template <typename T> ConstArrayRange<T> Array::Iter() const { return ConstArray
 template <typename T> MutableArrayRange<T> Array::Iter() { return MutableArrayRange<T>{this->_array}; }
 
 } // namespace vjson
-
-// @VALVE
-#include <tier0/memdbgon.h>
 
 #endif // _H
