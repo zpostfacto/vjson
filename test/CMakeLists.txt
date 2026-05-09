@@ -17,4 +17,6 @@ add_executable(
 	test_vjson.cpp
 	../vjson.cpp)
 target_link_libraries(test_vjson gtest_main)
-#add_test( FIXME )
+
+enable_testing()
+add_test(NAME test_vjson COMMAND test_vjson)
