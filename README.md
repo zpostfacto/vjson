@@ -92,7 +92,7 @@ For example:
 }
 ```
 
-here is how we could extra data from this this file using vjson:
+here is how we could extract data from this this file using vjson:
 
 ```cpp
 vjson::Object doc;
@@ -152,7 +152,7 @@ Here are a few C++ JSON libraries.
 
 JsonCpp is the library I found that came closest to meeting my needs.
 The thing I ended up with meets my needs better (especially the
-ergonomics and avoiding all the if() statements when traversing a
+ergonomics and avoiding all the if () statements when traversing a
 DOM), and I like my library better for my needs, but I must admit that
 the difference is small enough that if I had found this library
 earlier I might not have written mine.
@@ -175,7 +175,7 @@ project.
 - [minijson](https://giacomodrago.github.io/minijson/).  Just a parser,
   no DOM.
 - [ThorsSerializer](https://github.com/Loki-Astari/ThorsSerializer) not a
-  simple DOM.  More like go's approach to JSON serialization, it wants
+  simple DOM.  More like Go's approach to JSON serialization, it wants
   you to annotate your classes and load data directly into them.
 - [jvar](https://github.com/YasserAsmi/jvar) Has a boost dependency.
   Looks like a good, simple alternative if you don't mind that.
