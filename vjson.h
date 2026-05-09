@@ -17,6 +17,16 @@
 #include <vector>
 #include <map>
 
+// Compiling in valve codebase?  Bring in custom assert and memory allocator
+#ifdef VJSON_VALVE
+	#include <tier0/dbg.h>
+	#ifdef DBGFLAG_VALIDATE
+		#include <tier0/validator.h>
+	#endif
+	#include <tier0/memdbgoff.h>
+	#define VJSON_ASSERT Assert
+#endif
+
 // #define VJSON_ASSERT to something else if you want to customize
 // assertion behaviour. Assertions during parsing are only for bugs, not for
 // malformed input. Some functions may assert if used incorrectly, and so
@@ -247,7 +257,7 @@ public:
 	//       can be represented exactly in a double, an assert is triggered as this
 	//       is almost always an indication of a problem.  (If you don't need the precision,
 	//       just convert to double and then cast yourself!)
-	// 
+	//
 	// Arrays and objects always fail to convert to any destination type.
 	// Returns kOK on success, kWrongType on failure.
 	// Usually you will call one of the InterpretAsXxx functions below
@@ -472,7 +482,9 @@ public:
 	// Print the value to JSON text.
 	std::string PrintJSON( const PrintOptions &opt = PrintOptions{} ) const;
 
-
+	#if defined(VJSON_VALVE) && defined(DBGFLAG_VALIDATE)
+		void Validate( CValidator &validator, const char *pchName ) const;
+	#endif
 
 protected:
 
@@ -498,7 +510,7 @@ protected:
 // An Object is a Value that is known (or at least assumed) to be of type
 // kObject. Since it is assumed to be an object, we can provide a more
 // idiomatic object interface, and we can optimize a few function calls.
-// 
+//
 // NOTE: This is not a real, typesafe derived class!  It is just an
 // interface for when you assume the Value is an Object.  It's relatively
 // easy to willfully abuse this with dumb stuff like
@@ -722,7 +734,7 @@ struct ArrayIter {
 	void Next() {
 		auto e = this->end();
 		while ( this->cur_ptr < e && this->cur_ptr->Type() != TypeTraits<T>::kType )
-			++this->cur_ptr; 
+			++this->cur_ptr;
 	}
 	V *end() const { return this->array_ref.data() + this->array_ref.size(); }
 };
@@ -737,5 +749,9 @@ template <typename T> ConstArrayRange<T> Array::Iter() const { return ConstArray
 template <typename T> MutableArrayRange<T> Array::Iter() { return MutableArrayRange<T>{this->_array}; }
 
 } // namespace vjson
+
+#ifdef VJSON_VALVE
+	#include <tier0/memdbgon.h>
+#endif
 
 #endif // _H
