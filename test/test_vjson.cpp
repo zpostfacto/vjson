@@ -378,6 +378,228 @@ TEST(Misc, DoubleAtIndex) {
 	EXPECT_EQ( arr.DoubleAtIndex( 99, -1.0 ), -1.0 );
 }
 
+// Basic typed array iteration: Iter<T>() visits only elements of the matching type.
+TEST(Array, IterTyped) {
+	vjson::Array strs;
+	strs.push_back( "alpha" );
+	strs.push_back( "beta" );
+	strs.push_back( "gamma" );
+
+	std::vector<std::string> got;
+	for ( const char *s: strs.Iter<const char *>() )
+		got.push_back( s );
+	ASSERT_EQ( got.size(), 3u );
+	EXPECT_EQ( got[0], "alpha" );
+	EXPECT_EQ( got[1], "beta" );
+	EXPECT_EQ( got[2], "gamma" );
+
+	// Same elements via std::string overload
+	std::vector<std::string> got2;
+	for ( const std::string &s: strs.Iter<std::string>() )
+		got2.push_back( s );
+	EXPECT_EQ( got2, got );
+
+	// Double array
+	vjson::Array nums;
+	nums.push_back( 1.0 );
+	nums.push_back( 2.5 );
+	nums.push_back( -3.0 );
+
+	double sum = 0.0;
+	for ( double d: nums.Iter<double>() )
+		sum += d;
+	EXPECT_EQ( sum, 0.5 );
+}
+
+// Iter<T>() silently skips elements of every other type.
+TEST(Array, IterSkipsWrongType) {
+	vjson::Array arr;
+	arr.push_back( "first" );    // string
+	arr.push_back( 42.0 );       // double
+	arr.push_back( true );       // bool
+	arr.push_back( vjson::Value{} ); // null
+	arr.push_back( "second" );   // string
+	vjson::Object inner;
+	inner["x"] = 1.0;
+	arr.push_back( inner );      // object
+	vjson::Array nested;
+	nested.push_back( 99.0 );
+	arr.push_back( nested );     // array
+
+	// Only the two strings come through
+	std::vector<std::string> strings;
+	for ( const char *s: arr.Iter<const char *>() )
+		strings.push_back( s );
+	ASSERT_EQ( strings.size(), 2u );
+	EXPECT_EQ( strings[0], "first" );
+	EXPECT_EQ( strings[1], "second" );
+
+	// Only the one double
+	std::vector<double> doubles;
+	for ( double d: arr.Iter<double>() )
+		doubles.push_back( d );
+	ASSERT_EQ( doubles.size(), 1u );
+	EXPECT_EQ( doubles[0], 42.0 );
+
+	// Only the one bool
+	int bool_count = 0;
+	bool bool_val = false;
+	for ( bool b: arr.Iter<bool>() )
+	{
+		bool_val = b;
+		++bool_count;
+	}
+	EXPECT_EQ( bool_count, 1 );
+	EXPECT_TRUE( bool_val );
+
+	// Only the one object
+	int obj_count = 0;
+	for ( const vjson::Object &o: arr.Iter<vjson::Object>() )
+	{
+		EXPECT_EQ( o.DoubleAtKey( "x", 0.0 ), 1.0 );
+		++obj_count;
+	}
+	EXPECT_EQ( obj_count, 1 );
+
+	// Only the one nested array
+	int arr_count = 0;
+	for ( const vjson::Array &a: arr.Iter<vjson::Array>() )
+	{
+		EXPECT_EQ( a.DoubleAtIndex( 0, 0.0 ), 99.0 );
+		++arr_count;
+	}
+	EXPECT_EQ( arr_count, 1 );
+}
+
+// Iter<T>() on an empty array, or an array with no matching elements, yields zero iterations.
+TEST(Array, IterEmpty) {
+	vjson::Array empty;
+	int count = 0;
+	for ( const char *s: empty.Iter<const char *>() )
+		(void)s, ++count;
+	EXPECT_EQ( count, 0 );
+
+	// All-wrong-type array also yields nothing for the requested type
+	vjson::Array nums;
+	nums.push_back( 1.0 );
+	nums.push_back( 2.0 );
+	count = 0;
+	for ( const char *s: nums.Iter<const char *>() )
+		(void)s, ++count;
+	EXPECT_EQ( count, 0 );
+}
+
+// Mutable Iter<T>() allows in-place modification; non-matching elements are untouched.
+TEST(Array, IterMutable) {
+	vjson::Array arr;
+	arr.push_back( 1.0 );
+	arr.push_back( "skip me" );
+	arr.push_back( 2.0 );
+	arr.push_back( 3.0 );
+
+	for ( double &d: arr.Iter<double>() )
+		d *= 10.0;
+
+	EXPECT_EQ( arr.DoubleAtIndex( 0, 0.0 ),  10.0 );
+	EXPECT_EQ( arr.StringAtIndex( 1, "" ),   "skip me" ); // untouched
+	EXPECT_EQ( arr.DoubleAtIndex( 2, 0.0 ),  20.0 );
+	EXPECT_EQ( arr.DoubleAtIndex( 3, 0.0 ),  30.0 );
+}
+
+// Common pattern: array of objects parsed from JSON, with stray non-object
+// elements that should be silently skipped.
+TEST(Array, IterObjectsParsed) {
+	vjson::Value doc;
+	vjson::ParseContext ctx;
+	ASSERT_TRUE( doc.ParseJSON(
+	R"JSON([
+		{ "name": "Alice", "score": 10 },
+		42,
+		{ "name": "Bob",   "score": 20 },
+		"garbage",
+		{ "name": "Carol", "score": 30 }
+	])JSON", &ctx ) ) << ctx.error_message;
+
+	std::vector<std::string> names;
+	double total = 0.0;
+	for ( const vjson::Object &o: doc.AsArrayOrEmpty().Iter<vjson::Object>() )
+	{
+		names.push_back( o.StringAtKey( "name", "" ) );
+		total += o.DoubleAtKey( "score", 0.0 );
+	}
+
+	ASSERT_EQ( names.size(), 3u );
+	EXPECT_EQ( names[0], "Alice" );
+	EXPECT_EQ( names[1], "Bob" );
+	EXPECT_EQ( names[2], "Carol" );
+	EXPECT_EQ( total, 60.0 );
+}
+
+// Object range-based for iterates all key-value pairs in key-sorted order.
+TEST(Object, RangeFor) {
+	vjson::Object obj;
+	obj["banana"] = 2.0;
+	obj["apple"]  = 1.0;
+	obj["cherry"] = 3.0;
+
+	std::vector<std::string> keys;
+	std::vector<double>      vals;
+	for ( const auto &item: obj )
+	{
+		keys.push_back( item.first );
+		vals.push_back( item.second.AsDouble( -1.0 ) );
+	}
+
+	// std::map with ObjectKeyLess maintains lexicographic order
+	ASSERT_EQ( keys.size(), 3u );
+	EXPECT_EQ( keys[0], "apple"  ); EXPECT_EQ( vals[0], 1.0 );
+	EXPECT_EQ( keys[1], "banana" ); EXPECT_EQ( vals[1], 2.0 );
+	EXPECT_EQ( keys[2], "cherry" ); EXPECT_EQ( vals[2], 3.0 );
+}
+
+// Object range-based for with mixed value types; filter by type in the loop body.
+// (Object has no Iter<T>(); per-type filtering is done manually.)
+TEST(Object, RangeForMixedTypes) {
+	vjson::Object obj;
+	obj["name"]   = "Alice";
+	obj["score"]  = 42.0;
+	obj["active"] = true;
+	obj["tag"]    = "player";
+	obj["level"]  = 7.0;
+
+	// Collect only string values (keys sorted: "name" < "tag")
+	std::vector<std::string> strings;
+	for ( const auto &item: obj )
+		if ( item.second.IsString() )
+			strings.push_back( item.second.GetString() );
+	ASSERT_EQ( strings.size(), 2u );
+	EXPECT_EQ( strings[0], "Alice" );   // key "name"
+	EXPECT_EQ( strings[1], "player" );  // key "tag"
+
+	// Sum only numeric values; non-numeric entries skipped
+	double total = 0.0;
+	for ( const auto &item: obj )
+		if ( item.second.IsDouble() )
+			total += item.second.GetDouble();
+	EXPECT_EQ( total, 49.0 ); // 42.0 + 7.0
+}
+
+// Mutable object iteration: modify values in-place via item.second.
+TEST(Object, RangeForMutable) {
+	vjson::Object obj;
+	obj["x"] = 1.0;
+	obj["y"] = 2.0;
+	obj["z"] = "leave me";
+
+	for ( auto &item: obj )
+		if ( item.second.IsDouble() )
+			item.second.GetDouble() *= 10.0;
+
+	EXPECT_EQ( obj.DoubleAtKey( "x", 0.0 ), 10.0 );
+	EXPECT_EQ( obj.DoubleAtKey( "y", 0.0 ), 20.0 );
+	EXPECT_EQ( obj.StringAtKey( "z", "" ),  "leave me" ); // untouched
+}
+
 int main(int argc, char **argv) {
 	::testing::InitGoogleTest( &argc, argv );
 	return RUN_ALL_TESTS();
