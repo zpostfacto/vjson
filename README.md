@@ -14,7 +14,7 @@ Design goals:
   ``const char *`` is possible in most places.
 - No use of exceptions, RTTI, ``iostream``, etc.
 - DOM-style interface: read the whole document into some data
-  structures at once.  (No SAX-style / treaming) interface.)
+  structures at once.  (No SAX-style / streaming interface.)
 - Parser only accepts the document as memory block, so entire source must
   fit in memory.  (No ``istream``, ``FILE*``, iterator interface, etc)
 - Printing options: Some basic options for minified or indented.
@@ -24,7 +24,7 @@ Design goals:
   for "minified" JSON).
 - Parsing options: Comments and trailing commas can be optionally ignored.
 
-Here are some goals this library doesn't have.  (If you beed these, try
+Here are some goals this library doesn't have.  (If you need these, try
 one of the other libraries below.)
 
 - Remember formatting or comments, to support automated modification of
@@ -39,7 +39,7 @@ one of the other libraries below.)
 
 # Really?  Another JSON parser?
 
-My biggest complaint with other JSON libs is how tedius it can be
+My biggest complaint with other JSON libs is how tedious it can be
 to write code to load up a file.  Specifically:
 
 - Code to traverse the DOM should not require an excessive number of ``if``
@@ -63,8 +63,8 @@ That's when vjson shines.  For example:
 - If a key is missing, it can supply the default in a single function call.
 - If an array or object is missing, return an empty one.
 - If a value is present at the given key, but the wrong type, just act as
-  if it it missing.
-- If an array is only suoposed to contain a certin type of value, iterate
+  if it is missing.
+- If an array is only supposed to contain a certain type of value, iterate
   over the elements with that type in an idiomatic way, ignoring any elements
   that are the wrong type.
 - When loading/parsing a document that is supposed to be a single JSON object,
@@ -85,7 +85,7 @@ Here are a few C++ JSON libraries.
 
 JsonCpp is the library I found that came closest to meeting my needs.
 The thing I ended up with meets my needs better (especially the
-ergonimics and avoiding all the if() statements when traversing a
+ergonomics and avoiding all the if() statements when traversing a
 DOM), and I like my library better for my needs, but I must admit that
 the difference is small enough and if I would have found this library
 earlier I might not have written mine.
@@ -115,7 +115,7 @@ project.
   fast.  Has a SaX model, which might be useful if you want that.  Too
   big for my needs, nearly 40 headers.
 - [JSON for Modern C++](https://github.com/nlohmann/json) A 23K line
-  header file.  One design goal was the ability to put "JSON" loking
+  header file.  One design goal was the ability to put "JSON" looking
   syntax directly in C++ code and use Modern C++ be able to parse it
   into a data structure.
 - [ujson](https://github.com/awangk/ujson) A tiny library that I was
