@@ -600,6 +600,165 @@ TEST(Object, RangeForMutable) {
 	EXPECT_EQ( obj.StringAtKey( "z", "" ),  "leave me" ); // untouched
 }
 
+// Helper: parse input and verify it fails with the expected error location and message.
+static void CheckParseError( const char *input, int expected_line, int expected_byte,
+                              const char *msg_substr = nullptr )
+{
+	vjson::Value val;
+	vjson::ParseContext ctx;
+	EXPECT_FALSE( val.ParseJSON( input, &ctx ) )
+		<< "Expected parse error but succeeded on: " << input;
+	EXPECT_EQ( ctx.error_line, expected_line ) << "input: " << input;
+	EXPECT_EQ( ctx.error_byte_offset, expected_byte ) << "input: " << input;
+	if ( msg_substr )
+		EXPECT_NE( ctx.error_message.find( msg_substr ), std::string::npos )
+			<< "Expected '" << msg_substr << "' in error '" << ctx.error_message << "'";
+}
+
+// Unexpected end-of-input in various contexts; also verifies blank lines advance the line counter.
+TEST(ParseErrors, UnexpectedEOF) {
+	// Empty input: ptr=begin=end → byte 0, line 1
+	CheckParseError( "", 1, 0, "Unexpected end-of-input" );
+	// "[": after consuming '[', ptr=1=end → byte 1, line 1
+	CheckParseError( "[", 1, 1, "Unexpected end-of-input" );
+	// "{": same for objects
+	CheckParseError( "{", 1, 1, "Unexpected end-of-input" );
+	// {"a": — EOF while looking for value: ptr=5=end
+	CheckParseError( "{\"a\":", 1, 5, "Unexpected end-of-input" );
+	// Three newlines before unclosed '[': each newline bumps line; EOF at byte 4, line 4
+	CheckParseError( "[\n\n\n", 4, 4, "Unexpected end-of-input" );
+}
+
+// String parsing errors: unterminated, illegal characters, bad escape sequences.
+TEST(ParseErrors, StringErrors) {
+	// Unterminated: error ptr stays at byte 1 (first char inside the opening quote)
+	// "hello  →  " at 0; ptr=1 after ++ptr
+	CheckParseError( "\"hello", 1, 1, "Unterminated string" );
+
+	// Newline inside a string: ptr set to position of the '\n' (byte 4)
+	// "abc<NL>def"  →  " at 0, NL at 4
+	CheckParseError( "\"abc\ndef\"", 1, 4, "Newline character" );
+
+	// Control character 0x01: ptr set to its position (byte 3)
+	// "ab<0x01>cd"  →  " at 0, 0x01 at 3
+	// (string-literal concat prevents compiler from extending \x01 into "cd")
+	CheckParseError( "\"ab\x01" "cd\"", 1, 3, "Control character" );
+
+	// Invalid escape sequence (printable): ptr at the char after '\' (byte 2)
+	// "\q"  →  \ at 1, q at 2
+	CheckParseError( R"("\q")", 1, 2, "Invalid escape sequence" );
+
+	// Invalid char after '\' (space = 0x20, which is NOT > 0x20): byte 2
+	// "\ "  →  \ at 1, space at 2
+	CheckParseError( "\"\\ \"", 1, 2, "not valid after" );
+}
+
+// \uXXXX escape sequence errors.
+TEST(ParseErrors, UEscapeErrors) {
+	// EOF during \u: ptr set to s-1 = position of 'u' (byte 2)
+	// "\u"  →  \ at 1, u at 2, " at 3; s=3, s-1=2
+	CheckParseError( R"("\u")", 1, 2, "End of input during" );
+
+	// Non-hex digit at the third hex position: ptr at the bad char (byte 5)
+	// "\u00zz"  →  \ at 1, u at 2, 0 at 3, 0 at 4, z at 5
+	CheckParseError( R"("\u00zz")", 1, 5, "not a hex digit" );
+}
+
+// Object syntax errors.
+TEST(ParseErrors, ObjectSyntax) {
+	// Key not quoted: ptr at the unquoted char (byte 1)
+	// {abc}  →  { at 0, a at 1
+	CheckParseError( "{abc}", 1, 1, "Expected '\"'" );
+
+	// Missing colon after key: ptr at the offending char (byte 5)
+	// {"a" "b":2}  →  " at 5 is where ':' was expected
+	CheckParseError( "{\"a\" \"b\":2}", 1, 5, "Expected ':'" );
+
+	// Missing comma or closing brace: ptr at the offending char (byte 7)
+	// {"a":1 "b":2}  →  " at 7 where ',' or '}' expected
+	CheckParseError( "{\"a\":1 \"b\":2}", 1, 7, "Expected '}' or ','" );
+
+	// Trailing comma, strict mode: ptr at '}' (byte 7)
+	// {"a":1,}  →  } at 7
+	CheckParseError( "{\"a\":1,}", 1, 7, "trailing comma not permitted" );
+}
+
+// Array syntax errors.
+TEST(ParseErrors, ArraySyntax) {
+	// Missing comma or closing bracket: ptr at offending char (byte 3)
+	// [1 2]  →  2 at 3 is where ',' or ']' was expected
+	CheckParseError( "[1 2]", 1, 3, "Expected ']' or ','" );
+
+	// Trailing comma, strict mode: ptr at ']' (byte 3)
+	// [1,]  →  ] at 3
+	CheckParseError( "[1,]", 1, 3, "trailing comma not permitted" );
+}
+
+// Number parsing errors.
+TEST(ParseErrors, NumberErrors) {
+	// Digit required after '-': ptr at the bad char (byte 1)
+	// -a  →  - at 0, a at 1
+	CheckParseError( "-a", 1, 1, "Expected digit after '-'" );
+
+	// Leading zeros: ptr reset to start of number (byte 0)
+	// 01  →  start of number is byte 0
+	CheckParseError( "01", 1, 0, "Leading zeros" );
+
+	// Digit required after exponent: ptr at the bad char (byte 2)
+	// 1ex  →  1 at 0, e at 1, x at 2
+	CheckParseError( "1ex", 1, 2, "Digit is required after exponent" );
+
+	// Number too long (300 digits): ptr reset to start (byte 0)
+	CheckParseError( std::string( 300, '1' ).c_str(), 1, 0, "too many characters" );
+}
+
+// Top-level value errors.
+TEST(ParseErrors, ToplevelErrors) {
+	// Character that cannot start any JSON value: ptr at it (byte 0)
+	CheckParseError( "@", 1, 0, "not a valid JSON value" );
+
+	// Valid value followed by extra garbage: ptr at start of extra text (byte 2)
+	// "1 2"  →  1 at 0, space at 1, 2 at 2
+	CheckParseError( "1 2", 1, 2, "Extra text" );
+}
+
+// Object::ParseJSON with non-object input: line and byte are reset to 1/0.
+TEST(ParseErrors, ObjectParseTyped) {
+	vjson::Object obj;
+	vjson::ParseContext ctx;
+	EXPECT_FALSE( obj.ParseJSON( "[]", &ctx ) );
+	EXPECT_EQ( ctx.error_line, 1 );
+	EXPECT_EQ( ctx.error_byte_offset, 0 );
+	EXPECT_NE( ctx.error_message.find( "Failed to parse JSON object" ), std::string::npos )
+		<< "error was: " << ctx.error_message;
+}
+
+// Multi-line inputs: extra blank lines must advance the line counter correctly.
+TEST(ParseErrors, LineNumbers) {
+	// Three newlines before unclosed '[': line advances to 4, EOF at byte 4
+	CheckParseError( "[\n\n\n", 4, 4, "Unexpected end-of-input" );
+
+	// Syntax error on line 2 of an object
+	// "{\n  abc}"  →  { at 0, \n bumps to line 2, 'a' at byte 4 is the bad key char
+	CheckParseError( "{\n  abc}", 2, 4, "Expected '\"'" );
+
+	// Syntax error on line 3, with an extra blank line (line 2 is blank)
+	// "[\n\n  garbage\n]"  →  2 newlines push to line 3; 'g' at byte 5
+	CheckParseError( "[\n\n  garbage\n]", 3, 5, "not a valid JSON value" );
+}
+
+// Same logical error in minified vs. pretty-printed input:
+// byte offset and line number differ, but the error message is the same.
+TEST(ParseErrors, MinifiedVsPretty) {
+	// Minified: {"a":1 "b":2}  →  " at byte 7, line 1
+	CheckParseError( "{\"a\":1 \"b\":2}", 1, 7, "Expected '}' or ','" );
+
+	// Pretty: same missing comma, but " at byte 13, line 3
+	// byte: {=0 \n=1 sp=2 sp=3 "=4 a=5 "=6 :=7 sp=8 1=9 \n=10 sp=11 sp=12 "=13
+	// line: \n at 1 → line 2; \n at 10 → line 3; " at 13 is the offending char
+	CheckParseError( "{\n  \"a\": 1\n  \"b\": 2\n}", 3, 13, "Expected '}' or ','" );
+}
+
 int main(int argc, char **argv) {
 	::testing::InitGoogleTest( &argc, argv );
 	return RUN_ALL_TESTS();
