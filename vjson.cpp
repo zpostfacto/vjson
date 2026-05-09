@@ -668,11 +668,11 @@ struct Printer
 				{
 					case '\"': buf.append( "\\\"", 2 ); break;
 					case '\\': buf.append( "\\\\", 2 ); break;
-					case '\b': buf.append( "\\\b", 2 ); break;
-					case '\f': buf.append( "\\\f", 2 ); break;
-					case '\n': buf.append( "\\\n", 2 ); break;
-					case '\r': buf.append( "\\\r", 2 ); break;
-					case '\t': buf.append( "\\\t", 2 ); break;
+					case '\b': buf.append( "\\b", 2 ); break;
+					case '\f': buf.append( "\\f", 2 ); break;
+					case '\n': buf.append( "\\n", 2 ); break;
+					case '\r': buf.append( "\\r", 2 ); break;
+					case '\t': buf.append( "\\t", 2 ); break;
 					default:
 						if ( (unsigned char)c < 0x20 )
 						{
