@@ -6,13 +6,14 @@ Design goals:
 
 - Good ergonomics when traversing the DOM (see below).  This is the most
   unique goal among the many other libraries available.
-- Small: one ~700-line header, one .cpp file
+- Small: one ~750-line header, one ~1700-line .cpp file
 - No external dependencies.  (No, not even boost.)
 - Use STL containers for storage: ``std::vector`` for arrays;
   ``std::map`` for objects.
 - Strings and keys stored as ``std::string``, but access using
   ``const char *`` is possible in most places.
-- No use of exceptions, RTTI, ``iostream``, etc.
+- No use of exceptions, RTTI, ``iostream``, etc.  Safe to use in
+  codebases that disable exceptions entirely.
 - DOM-style interface: read the whole document into some data
   structures at once.  (No SAX-style / streaming interface.)
 - Parser only accepts the document as memory block, so entire source must
@@ -87,7 +88,7 @@ JsonCpp is the library I found that came closest to meeting my needs.
 The thing I ended up with meets my needs better (especially the
 ergonomics and avoiding all the if() statements when traversing a
 DOM), and I like my library better for my needs, but I must admit that
-the difference is small enough and if I would have found this library
+the difference is small enough that if I had found this library
 earlier I might not have written mine.
 
 - [JsonCpp](https://github.com/open-source-parsers/jsoncpp) Good
@@ -101,6 +102,10 @@ the particular goals I have for most of my projects, but they offer
 unique features and tradeoffs and might be more appropriate for your
 project.
 
+- [JSON for Modern C++](https://github.com/nlohmann/json) A single
+  header file (currently ~24K lines).  One design goal was the ability
+  to put "JSON" looking syntax directly in C++ code and use Modern C++
+  to parse it into a data structure.
 - [minijson](https://giacomodrago.github.io/minijson/).  Just a parser,
   no DOM.
 - [ThorsSerializer](https://github.com/Loki-Astari/ThorsSerializer) not a
@@ -109,18 +114,21 @@ project.
 - [jvar](https://github.com/YasserAsmi/jvar) Has a boost dependency.
   Looks like a good, simple alternative if you don't mind that.
 - [JSONCONS](https://github.com/danielaparker/jsoncons) is a very
-  fully-featured library.  Much bigger than mine.  Has a boost
-  dependency.  Uses exceptions.
+  fully-featured library.  Much bigger than mine.  Uses exceptions.
+  (Note: no longer has a boost dependency as of recent versions.)
 - [rapidjson](https://github.com/Tencent/rapidjson) Claims to be very
-  fast.  Has a SaX model, which might be useful if you want that.  Too
+  fast.  Has a SAX model, which might be useful if you want that.  Too
   big for my needs, nearly 40 headers.
-- [JSON for Modern C++](https://github.com/nlohmann/json) A 23K line
-  header file.  One design goal was the ability to put "JSON" looking
-  syntax directly in C++ code and use Modern C++ be able to parse it
-  into a data structure.
+- [simdjson](https://github.com/simdjson/simdjson) Parses JSON using
+  SIMD instructions; claims to parse faster than disk I/O speed.  If
+  you need to parse very large documents at high throughput, this is
+  worth a look.
+- [Boost.JSON](https://boost.org/libs/json) A solid DOM-style library
+  that has been part of Boost since 1.75 (2020).  Good choice if you
+  are already using Boost.
+- [picojson](https://github.com/kazuho/picojson) I used this at Valve
+  for a while after abandoning ujson.  It uses exceptions and streams.
 - [ujson](https://github.com/awangk/ujson) A tiny library that I was
   using for a while at Valve.  I found some bugs and reported them,
   the project has been abandoned.  The main reason for mentioning it
   is that it is partly the namesake of this library.
-- [picojson](https://github.com/kazuho/picojson) I used this at Valve
-  for a while after abandoning ujson.  It uses exceptions and streams.
