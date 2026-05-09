@@ -435,7 +435,7 @@ public:
 	std::string   StringAtIndex       ( size_t idx, const std::string &defaultVal ) const { const Value *t = InternalAtIndex( idx, kString ); return t ? t->_string : defaultVal; } // NOTE: always returns a copy
 	std::string   StringAtIndex       ( size_t idx, std::string &&     defaultVal ) const { const Value *t = InternalAtIndex( idx, kString ); return t ? t->_string : std::forward<std::string>( defaultVal ); } // Avoids the copy
 	bool          BoolAtIndex         ( size_t idx, bool               defaultVal ) const { const Value *t = InternalAtIndex( idx, kBool   ); return t ? t->_bool : defaultVal; } // Requires strict bool type
-	double        DoubleAtIndex       ( size_t idx, double             defaultVal ) const { const Value *t = InternalAtIndex( idx, kDouble ); return t ? t->_bool : defaultVal; }
+	double        DoubleAtIndex       ( size_t idx, double             defaultVal ) const { const Value *t = InternalAtIndex( idx, kDouble ); return t ? t->_double : defaultVal; }
 	int           IntAtIndex          ( size_t idx, int                defaultVal ) const { const Value *t = InternalAtIndex( idx, kDouble ); return t ? (int)t->_double : defaultVal; }
 	const Object *ObjectPtrAtIndex    ( size_t idx                                ) const { return (const Object *)InternalAtIndex( idx, kObject ); }
 	Object *      ObjectPtrAtIndex    ( size_t idx                                )       { return (      Object *)InternalAtIndex( idx, kObject ); }
