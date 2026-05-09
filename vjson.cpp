@@ -1018,7 +1018,7 @@ struct Parser
 			{
 				ptr = s; // Set pointer so we can report the location more accurately
 				Errorf( "Character 0x%02x is not a hex digit; invalid \\u-escaped sequence", c );
-				return false;
+				return -1;
 			}
 			++s;
 		}
