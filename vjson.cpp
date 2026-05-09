@@ -847,6 +847,12 @@ struct Printer
 			case kArray:
 				PrintArray( v.GetArray().Raw() );
 				break;
+
+			case kDeleted:
+			default:
+				VJSON_ASSERT(false);
+				Append("null", 4); // safe fallback
+				break;
 		}
 	}
 };
