@@ -704,16 +704,15 @@ struct Printer
 			);
 			buf.push_back( delim );
 			buf.push_back( '\n' );
-			for ( size_t i = 0 ; i < indent_level ; ++i )
-				buf.append( opt.indent, opt.indent + indent_level );
+			++indent_level;
+			Indent();
 		}
 		else
 		{
 			Reserve( 128 + num_children*2 + indent_level ); // body + unindent
 			buf.push_back( delim );
+			++indent_level;
 		}
-
-		++indent_level;
 	}
 
 	void EndBlock( char delim )
@@ -797,7 +796,7 @@ struct Printer
 		}
 
 		BeginBlock( '{', obj.size() );
-		const char *colon = indent_level>0 ? ": " : ":";
+		const char *colon = indent_len ? ": " : ":";
 		bool is_first = true;
 		for ( const ObjectItem &item: obj )
 		{
