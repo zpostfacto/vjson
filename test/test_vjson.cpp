@@ -759,6 +759,31 @@ TEST(ParseErrors, MinifiedVsPretty) {
 	CheckParseError( "{\n  \"a\": 1\n  \"b\": 2\n}", 3, 13, "Expected '}' or ','" );
 }
 
+TEST(ParseErrors, NestingDepth) {
+	// At default max_depth=25, exactly 25 levels deep should succeed
+	std::string at_limit( 25, '[' );
+	at_limit += std::string( 25, ']' );
+	vjson::Value val;
+	vjson::ParseContext ctx;
+	EXPECT_TRUE( val.ParseJSON( at_limit.c_str(), &ctx ) ) << ctx.error_message;
+
+	// One deeper than the limit should fail
+	std::string over_limit( 26, '[' );
+	over_limit += std::string( 26, ']' );
+	CheckParseError( over_limit.c_str(), 1, 25, "Nesting depth limit" );
+
+	// A custom limit of 3 should reject 4 levels deep
+	vjson::ParseContext shallow_ctx;
+	shallow_ctx.max_depth = 3;
+	std::string four_deep( 4, '[' );
+	four_deep += std::string( 4, ']' );
+	EXPECT_FALSE( val.ParseJSON( four_deep.c_str(), &shallow_ctx ) );
+	EXPECT_NE( shallow_ctx.error_message.find( "Nesting depth limit" ), std::string::npos );
+
+	// Objects count too
+	CheckParseError( "[[[[[[[[[[[[[[[[[[[[[[[[[[", 1, 25, "Nesting depth limit" );
+}
+
 // Verify all the API calls in the README "quick example" section compile and
 // produce the documented results.
 TEST(Misc, ReadmeExample) {

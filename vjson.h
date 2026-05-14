@@ -43,6 +43,11 @@
 	#define VJSON_DEFAULT_INDENT "\t"
 #endif
 
+// Default maximum nesting depth for parsing.
+#ifndef VJSON_DEFAULT_MAX_DEPTH
+	#define VJSON_DEFAULT_MAX_DEPTH 25
+#endif
+
 namespace vjson {
 
 // The different type of JSON values
@@ -127,6 +132,7 @@ struct ParseContext
 	// Options
 	bool allow_trailing_comma = false;
 	bool allow_cpp_comments = false;
+	int max_depth = VJSON_DEFAULT_MAX_DEPTH;
 
 	// If there's an error, it will be returned here
 	std::string error_message;

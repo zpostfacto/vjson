@@ -879,6 +879,8 @@ struct Parser
 
 	ParseContext &ctx;
 
+	int depth = 0;
+
 	// Original extents
 	const char *const begin;
 	const char *const end;
@@ -1595,12 +1597,32 @@ unterminated_string:
 				return ParseNumber( out );
 
 			case '{':
+			{
+				if ( depth >= ctx.max_depth )
+				{
+					Errorf( "Nesting depth limit (%d) exceeded", ctx.max_depth );
+					return false;
+				}
 				++ptr;
-				return ParseObject( out );
+				++depth;
+				bool result = ParseObject( out );
+				--depth;
+				return result;
+			}
 
 			case '[':
+			{
+				if ( depth >= ctx.max_depth )
+				{
+					Errorf( "Nesting depth limit (%d) exceeded", ctx.max_depth );
+					return false;
+				}
 				++ptr;
-				return ParseArray( out );
+				++depth;
+				bool result = ParseArray( out );
+				--depth;
+				return result;
+			}
 
 			case 't':
 				if ( ptr + 4 <= end && ptr[1] == 'r' && ptr[2] == 'u' && ptr[3] == 'e' )
