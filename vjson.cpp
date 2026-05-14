@@ -342,6 +342,13 @@ void Value::SetEmptyArray()
 	}
 }
 
+void Value::SetUint64AsString( uint64_t x )
+{
+	char buf[ 32 ];
+	snprintf( buf, sizeof(buf), "%llu", (unsigned long long)x );
+	*this = buf;
+}
+
 EResult Value::TryInterpret( std::string &outX ) const
 {
 	switch ( _type )
