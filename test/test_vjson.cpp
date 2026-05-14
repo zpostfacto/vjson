@@ -659,9 +659,75 @@ TEST(ParseErrors, UEscapeErrors) {
 	// "\u"  →  \ at 1, u at 2, " at 3; s=3, s-1=2
 	CheckParseError( R"("\u")", 1, 2, "End of input during" );
 
+	// 1 hex digit then EOF: same "End of input" (s+4 still overshoots the buffer)
+	// "\u0"  →  u at 2; s+4 = 7 > 5 = end
+	CheckParseError( R"("\u0")", 1, 2, "End of input during" );
+
+	// 2 hex digits then EOF: same
+	// "\u00"  →  s+4 = 7 > 6 = end
+	CheckParseError( R"("\u00")", 1, 2, "End of input during" );
+
+	// 3 hex digits then closing quote: quote is not a hex digit
+	// "\u000"  →  " at byte 6 fails the hex check
+	CheckParseError( R"("\u000")", 1, 6, "not a hex digit" );
+
 	// Non-hex digit at the third hex position: ptr at the bad char (byte 5)
 	// "\u00zz"  →  \ at 1, u at 2, 0 at 3, 0 at 4, z at 5
 	CheckParseError( R"("\u00zz")", 1, 5, "not a hex digit" );
+
+	// Bad digit at the very first hex position
+	// "\uGGGG"  →  G at byte 3
+	CheckParseError( R"("\uGGGG")", 1, 3, "not a hex digit" );
+}
+
+// \uXXXX escapes that are valid must produce the correct UTF-8 bytes.
+TEST(Parse, ValidUnicodeEscapes) {
+	auto parseStr = []( const char *json ) -> std::string {
+		vjson::Value v;
+		vjson::ParseContext ctx;
+		EXPECT_TRUE( v.ParseJSON( json, &ctx ) ) << ctx.error_message;
+		return v.IsString() ? v.GetString() : "";
+	};
+
+	// ASCII: \u0041 -> A (1-byte UTF-8)
+	EXPECT_EQ( parseStr( "\"\\u0041\"" ), "A" );
+
+	// Lowercase and uppercase hex both accepted: \u00e9 same as \u00E9
+	EXPECT_EQ( parseStr( "\"\\u00e9\"" ), parseStr( "\"\\u00E9\"" ) );
+
+	// 2-byte UTF-8: U+00E9 LATIN SMALL LETTER E WITH ACUTE (e-acute)
+	EXPECT_EQ( parseStr( "\"\\u00E9\"" ), "\xC3\xA9" );
+
+	// 3-byte UTF-8: U+30AF KATAKANA LETTER KU
+	EXPECT_EQ( parseStr( "\"\\u30AF\"" ), "\xE3\x82\xAF" );
+
+	// Multiple escapes in sequence -> "Hello"
+	EXPECT_EQ( parseStr( "\"\\u0048\\u0065\\u006C\\u006C\\u006F\"" ), "Hello" );
+
+	// Mixed with literal ASCII: caf + e-acute
+	EXPECT_EQ( parseStr( "\"caf\\u00E9\"" ), "caf\xC3\xA9" );
+
+	// Null codepoint: \u0000 -> embedded null byte in std::string
+	// (JSON input is pure ASCII; only the decoded output has a null byte)
+	std::string with_null = parseStr( "\"\\u0000\"" );
+	ASSERT_EQ( with_null.size(), 1u );
+	EXPECT_EQ( with_null[0], '\0' );
+}
+
+// Whole-number doubles must serialize without a decimal point.
+TEST(Print, IntegralDoubles) {
+	vjson::PrintOptions mini;
+	mini.indent = nullptr;
+
+	auto printVal = [&]( double d ) -> std::string {
+		vjson::Value v( d );
+		return v.PrintJSON( mini );
+	};
+
+	EXPECT_EQ( printVal(  0.0 ),  "0" );
+	EXPECT_EQ( printVal(  1.0 ),  "1" );
+	EXPECT_EQ( printVal( 42.0 ), "42" );
+	EXPECT_EQ( printVal( -3.0 ), "-3" );
 }
 
 // Object syntax errors.
