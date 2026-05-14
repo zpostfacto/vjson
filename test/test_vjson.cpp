@@ -627,6 +627,18 @@ TEST(ParseErrors, UnexpectedEOF) {
 	CheckParseError( "{\"a\":", 1, 5, "Unexpected end-of-input" );
 	// Three newlines before unclosed '[': each newline bumps line; EOF at byte 4, line 4
 	CheckParseError( "[\n\n\n", 4, 4, "Unexpected end-of-input" );
+
+	// Missing closing '}': EOF comes after a complete key-value pair
+	// {"a":1  →  after parsing 1, ptr=6=end
+	CheckParseError( "{\"a\":1", 1, 6, "Unexpected end-of-input" );
+
+	// Missing closing ']': EOF comes after the last element
+	// [1,2  →  after parsing 2, ptr=4=end
+	CheckParseError( "[1,2", 1, 4, "Unexpected end-of-input" );
+
+	// EOF after a trailing comma inside an array (comma consumed, then EOF)
+	// [1,  →  ++ptr past comma brings ptr=3=end; checked before parsing next element
+	CheckParseError( "[1,", 1, 3, "Unexpected end-of-input" );
 }
 
 // String parsing errors: unterminated, illegal characters, bad escape sequences.
@@ -736,6 +748,26 @@ TEST(ParseErrors, ObjectSyntax) {
 	// {abc}  →  { at 0, a at 1
 	CheckParseError( "{abc}", 1, 1, "Expected '\"'" );
 
+	// Number as key: same error, number is not a quoted string
+	// {1:"a"}  →  1 at byte 1
+	CheckParseError( "{1:\"a\"}", 1, 1, "Expected '\"'" );
+
+	// null/true/false as key
+	CheckParseError( "{null:1}", 1, 1, "Expected '\"'" );
+	CheckParseError( "{true:1}", 1, 1, "Expected '\"'" );
+
+	// Opening colon with no key at all
+	// {:"a"}  →  : at byte 1
+	CheckParseError( "{:\"a\"}", 1, 1, "Expected '\"'" );
+
+	// Extra comma between items: second comma is not a valid key start
+	// {"a":1,,}  →  second , at byte 7
+	CheckParseError( "{\"a\":1,,}", 1, 7, "Expected '\"'" );
+
+	// Missing value after colon
+	// {"a":}  →  } at byte 5 is not a valid value
+	CheckParseError( "{\"a\":}", 1, 5, "not a valid JSON value" );
+
 	// Missing colon after key: ptr at the offending char (byte 5)
 	// {"a" "b":2}  →  " at 5 is where ':' was expected
 	CheckParseError( "{\"a\" \"b\":2}", 1, 5, "Expected ':'" );
@@ -758,6 +790,14 @@ TEST(ParseErrors, ArraySyntax) {
 	// Trailing comma, strict mode: ptr at ']' (byte 3)
 	// [1,]  →  ] at 3
 	CheckParseError( "[1,]", 1, 3, "trailing comma not permitted" );
+
+	// Extra comma at the start of an array (before any element)
+	// [,1]  →  , at byte 1 is not a valid value start
+	CheckParseError( "[,1]", 1, 1, "not a valid JSON value" );
+
+	// Double comma between elements
+	// [1,,2]  →  second , at byte 3 is not a valid value
+	CheckParseError( "[1,,2]", 1, 3, "not a valid JSON value" );
 }
 
 // Number parsing errors.
@@ -848,6 +888,120 @@ TEST(ParseErrors, NestingDepth) {
 
 	// Objects count too
 	CheckParseError( "[[[[[[[[[[[[[[[[[[[[[[[[[[", 1, 25, "Nesting depth limit" );
+}
+
+// uint64_t interpretation: SetUint64AsString round-trip, parse from string/double, failures.
+TEST(Misc, Uint64) {
+	// SetUint64AsString stores as a string; TryInterpret recovers the value
+	vjson::Value v;
+	v.SetUint64AsString( 0 );
+	EXPECT_TRUE( v.IsString() );
+	EXPECT_EQ( v.InterpretAsUint64( 99 ), 0ull );
+
+	v.SetUint64AsString( 1 );
+	EXPECT_EQ( v.InterpretAsUint64( 99 ), 1ull );
+
+	v.SetUint64AsString( 18446744073709551615ull ); // UINT64_MAX
+	EXPECT_EQ( v.InterpretAsUint64( 0 ), 18446744073709551615ull );
+
+	// Parse from a numeric string
+	v = "0";
+	EXPECT_EQ( v.InterpretAsUint64( 99 ), 0ull );
+
+	v = "18446744073709551615";
+	EXPECT_EQ( v.InterpretAsUint64( 0 ), 18446744073709551615ull );
+
+	v = "123456789";
+	EXPECT_EQ( v.InterpretAsUint64( 0 ), 123456789ull );
+
+	// Parse from a small double (fits exactly)
+	v = vjson::Value( 0.0 );
+	EXPECT_EQ( v.InterpretAsUint64( 99 ), 0ull );
+
+	v = vjson::Value( 42.0 );
+	EXPECT_EQ( v.InterpretAsUint64( 0 ), 42ull );
+
+	// Failure: negative double
+	uint64_t out = 99;
+	v = vjson::Value( -1.0 );
+	EXPECT_EQ( v.TryInterpret( out ), vjson::kWrongType );
+	EXPECT_EQ( out, 99ull ); // unchanged on failure
+
+	// Failure: float string (has a decimal point)
+	v = "3.14";
+	EXPECT_EQ( v.TryInterpret( out ), vjson::kWrongType );
+
+	// Failure: non-numeric string
+	v = "hello";
+	EXPECT_EQ( v.TryInterpret( out ), vjson::kWrongType );
+
+	// Failure: empty string
+	v = "";
+	EXPECT_EQ( v.TryInterpret( out ), vjson::kWrongType );
+
+	// Failure: bool, null, object, array
+	v = true;
+	EXPECT_EQ( v.TryInterpret( out ), vjson::kWrongType );
+
+	v = vjson::Value{};  // null
+	EXPECT_EQ( v.TryInterpret( out ), vjson::kWrongType );
+
+	v.SetEmptyObject();
+	EXPECT_EQ( v.TryInterpret( out ), vjson::kWrongType );
+
+	v.SetEmptyArray();
+	EXPECT_EQ( v.TryInterpret( out ), vjson::kWrongType );
+}
+
+// C++ // comments are ignored when allow_cpp_comments is set.
+TEST(ParseOptions, CppComments) {
+	vjson::Value v;
+	vjson::ParseContext ctx;
+	ctx.allow_cpp_comments = true;
+
+	// Comment before the value
+	EXPECT_TRUE( v.ParseJSON( "// preamble\n42", &ctx ) ) << ctx.error_message;
+	EXPECT_EQ( v.AsDouble( 0 ), 42.0 );
+
+	// Comment inside an object, including inline after a value
+	EXPECT_TRUE( v.ParseJSON(
+		"{\n"
+		"  // this is a comment\n"
+		"  \"a\": 1, // inline comment\n"
+		"  \"b\": 2\n"
+		"}", &ctx ) ) << ctx.error_message;
+	EXPECT_EQ( v.DoubleAtKey( "a", 0 ), 1.0 );
+	EXPECT_EQ( v.DoubleAtKey( "b", 0 ), 2.0 );
+
+	// Empty comment line
+	EXPECT_TRUE( v.ParseJSON( "//\n[1,2]", &ctx ) ) << ctx.error_message;
+
+	// Without the flag, // is rejected
+	vjson::ParseContext strict;
+	EXPECT_FALSE( v.ParseJSON( "// comment\n42", &strict ) );
+	EXPECT_NE( strict.error_message.find( "not a valid JSON value" ), std::string::npos );
+}
+
+// Trailing commas are accepted when allow_trailing_comma is set.
+TEST(ParseOptions, TrailingComma) {
+	vjson::Value v;
+	vjson::ParseContext ctx;
+	ctx.allow_trailing_comma = true;
+
+	// Object with trailing comma
+	EXPECT_TRUE( v.ParseJSON( "{\"a\":1,}", &ctx ) ) << ctx.error_message;
+	EXPECT_EQ( v.DoubleAtKey( "a", 0 ), 1.0 );
+
+	// Array with trailing comma
+	EXPECT_TRUE( v.ParseJSON( "[1,2,3,]", &ctx ) ) << ctx.error_message;
+	EXPECT_EQ( v.AsArrayOrEmpty().ArrayLen(), 3u );
+
+	// Both disallowed in strict mode
+	vjson::ParseContext strict;
+	EXPECT_FALSE( v.ParseJSON( "{\"a\":1,}", &strict ) );
+	EXPECT_NE( strict.error_message.find( "trailing comma" ), std::string::npos );
+	EXPECT_FALSE( v.ParseJSON( "[1,]", &strict ) );
+	EXPECT_NE( strict.error_message.find( "trailing comma" ), std::string::npos );
 }
 
 // Verify all the API calls in the README "quick example" section compile and
