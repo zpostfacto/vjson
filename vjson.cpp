@@ -101,7 +101,7 @@ void Value::InternalConstruct( Value &&x )
 Value *Value::InternalAtIndex( size_t idx, EValueType t ) const
 {
 	Value *v = (const_cast<Value*>(this))->ValuePtrAtIndex( idx );
-	return (v && v->_type == t) ? v : nullptr; 
+	return (v && v->_type == t) ? v : nullptr;
 }
 
 Value *Value::ValuePtrAtKey( const std::string &key )
@@ -127,13 +127,13 @@ Value *Value::ValuePtrAtKey( const char *key )
 Value *Value::InternalAtKey( const std::string &key, EValueType t ) const
 {
 	Value *v = (const_cast<Value*>(this))->ValuePtrAtKey( key );
-	return (v && v->_type == t) ? v : nullptr; 
+	return (v && v->_type == t) ? v : nullptr;
 }
 
 Value *Value::InternalAtKey( const char *key, EValueType t ) const
 {
 	Value *v = (const_cast<Value*>(this))->ValuePtrAtKey( key );
-	return (v && v->_type == t) ? v : nullptr; 
+	return (v && v->_type == t) ? v : nullptr;
 }
 
 Value::Value( EValueType type ) : _type( type )
