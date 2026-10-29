@@ -1054,6 +1054,20 @@ TEST(Misc, ReadmeExample) {
 	EXPECT_EQ( match_id, 14889406635632900096ull );
 }
 
+// Arrays that grow should move their elements instead of copying them.
+TEST(Array, GrowthMovesElementsInsteadOfCopying) {
+	vjson::Array arr;
+	arr.push_back( std::string( 100, 'x' ) );
+	const char *before = arr[0].GetCString();
+
+	size_t old_cap = arr.Raw().capacity();
+	while ( arr.Raw().capacity() == old_cap )
+		arr.push_back( 0 );
+
+	// If we moved them, then the pointers should be the same
+	EXPECT_EQ( (const void *)arr[0].GetCString(), (const void *)before );
+}
+
 int main(int argc, char **argv) {
 	::testing::InitGoogleTest( &argc, argv );
 	return RUN_ALL_TESTS();

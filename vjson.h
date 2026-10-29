@@ -175,7 +175,7 @@ public:
 
 	// Basic C++ object lifetime stuff
 	Value( const Value &x ) { InternalConstruct( x ); }
-	Value( Value &&x ) { InternalConstruct( std::forward<Value>( x ) ); }
+	Value( Value &&x ) noexcept { InternalConstruct( std::forward<Value>( x ) ); }
 	~Value() { InternalDestruct(); }
 
 	// Construct directly from primitive values.
