@@ -82,6 +82,8 @@ class Value; class Object; class Array;
 struct PrintOptions; struct ParseContext;
 struct ObjectKeyLess
 {
+	using is_transparent = void;
+
 	bool operator()( const std::string &l, const std::string &r ) const { return strcmp( l.c_str(), r.c_str() ) < 0; }
 
 	// With C++14, we don't need to make a copy of the key to do lookup,
