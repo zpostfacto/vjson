@@ -726,6 +726,14 @@ TEST(Parse, ValidUnicodeEscapes) {
 	EXPECT_EQ( with_null[0], '\0' );
 }
 
+// A string with \u0000 must print the entire string, regardless of the null terminator.
+TEST(Print, EmbeddedNul) {
+	vjson::Value v;
+	ASSERT_TRUE( v.ParseJSON( R"("a\u0000somehiddensneakytext")" ) );
+	EXPECT_EQ( v.GetString().size(), 22u );
+	EXPECT_EQ( v.PrintJSON(), R"("a\u0000somehiddensneakytext")" );
+}
+
 // Whole-number doubles must serialize without a decimal point.
 TEST(Print, IntegralDoubles) {
 	vjson::PrintOptions mini;

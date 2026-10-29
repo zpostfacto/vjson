@@ -826,7 +826,7 @@ struct Printer
 				break;
 
 			case kString:
-				AppendQuotedString( v.GetString().c_str() );
+				AppendQuotedString( v.GetString() );
 				break;
 
 			case kDouble:
