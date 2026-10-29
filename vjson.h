@@ -82,12 +82,15 @@ class Value; class Object; class Array;
 struct PrintOptions; struct ParseContext;
 struct ObjectKeyLess
 {
-	bool operator()( const std::string &l, const std::string &r ) const { return strcmp( l.c_str(), r.c_str() ) < 0; }
+	using is_transparent = void;
+
+	// Use compare() rather than strcmp() so keys containing \u0000 don't collide
+	bool operator()( const std::string &l, const std::string &r ) const { return l.compare( r ) < 0; }
 
 	// With C++14, we don't need to make a copy of the key to do lookup,
 	// so long as the comparator can compare the types.
-	bool operator()( const std::string &l, const char *r ) const { return strcmp( l.c_str(), r ) < 0; }
-	bool operator()( const char *l, const std::string &r ) const { return strcmp( l, r.c_str() ) < 0; }
+	bool operator()( const std::string &l, const char *r ) const { return l.compare( r ) < 0; }
+	bool operator()( const char *l, const std::string &r ) const { return r.compare( l ) > 0; }
 
 	// FIXME string_view?
 };
@@ -699,9 +702,9 @@ template <typename K, typename T>
 EResult Value::TryInterpretAtKey( K&& key, T &outResult ) const
 {
 	if ( _type != kObject ) return kNotObject;
-	auto it = _object.find( key );
-	if ( it == _object.end() ) return kBadKey;
-	return it->second.TryInterpret( outResult );
+	const Value *v = ValuePtrAtKey( key );
+	if ( !v ) return kBadKey;
+	return v->TryInterpret( outResult );
 }
 
 template <typename T>

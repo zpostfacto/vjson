@@ -600,6 +600,20 @@ TEST(Object, RangeForMutable) {
 	EXPECT_EQ( obj.StringAtKey( "z", "" ),  "leave me" ); // untouched
 }
 
+// Keys containing \u0000 with the same "prefix" shouldn't be considered the same.
+TEST(Object, KeysWithEmbeddedNul) {
+	using namespace std::string_literals;
+
+	vjson::Object obj;
+	ASSERT_TRUE( obj.ParseJSON( R"({ "a\u0000x": 1, "a\u0000y": 2 })" ) );
+	EXPECT_EQ( obj.size(), 2u );
+	EXPECT_EQ( obj.IntAtKey( "a\0x"s, 0 ), 1 );
+	EXPECT_EQ( obj.IntAtKey( "a\0y"s, 0 ), 2 );
+
+	// they no longer get parsed as just "a".
+	EXPECT_FALSE( obj.HasKey( "a" ) );
+}
+
 // Helper: parse input and verify it fails with the expected error location and message.
 static void CheckParseError( const char *input, int expected_line, int expected_byte,
                               const char *msg_substr = nullptr )

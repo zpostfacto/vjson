@@ -116,7 +116,8 @@ Value *Value::ValuePtrAtKey( const std::string &key )
 
 Value *Value::ValuePtrAtKey( const char *key )
 {
-	if ( _type != kObject )
+	VJSON_ASSERT( key );
+	if ( _type != kObject || !key )
 		return nullptr;
 	auto it = _object.find( key ); // NOTE: Before C++14, this makes a copy of the key!!!!  SO BAD!
 	if ( it == _object.end() )
