@@ -1120,6 +1120,7 @@ unterminated_string:
 
 					case '"':
 					case '\\':
+					case '/':
 					case 'b':
 					case 'f':
 					case 'n':
