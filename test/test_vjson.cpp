@@ -724,6 +724,9 @@ TEST(Parse, ValidUnicodeEscapes) {
 	std::string with_null = parseStr( "\"\\u0000\"" );
 	ASSERT_EQ( with_null.size(), 1u );
 	EXPECT_EQ( with_null[0], '\0' );
+
+	// Escaped solidus: \/ -> /
+	EXPECT_EQ( parseStr( R"("http:\/\/a\/b")" ), "http://a/b" );
 }
 
 // Whole-number doubles must serialize without a decimal point.
